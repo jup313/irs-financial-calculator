@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IRS Financial Calculator — Sign In</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;color:#333}
+.card{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.4);width:100%;max-width:420px;padding:40px;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#5D5CDE,#3498db)}
+.logo{text-align:center;margin-bottom:28px}
+.logo h1{font-size:1.6rem;font-weight:700;color:#5D5CDE;margin-bottom:4px}
+.logo p{font-size:0.85rem;color:#888}
+.form-group{margin-bottom:18px}
+label{display:block;font-size:0.82rem;font-weight:600;color:#555;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+input{width:100%;padding:12px 14px;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;color:#333;transition:border-color .2s,box-shadow .2s;background:#fafafa;outline:none}
+input:focus{border-color:#5D5CDE;box-shadow:0 0 0 3px rgba(93,92,222,0.12);background:#fff}
+.input-wrap{position:relative}
+.toggle-pw{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;font-size:0.85rem;padding:4px}
+.toggle-pw:hover{color:#5D5CDE}
+.btn{width:100%;padding:13px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:.3px}
+.btn-primary{background:linear-gradient(135deg,#5D5CDE,#3498db);color:#fff}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(93,92,222,.4)}
+.btn-primary:active{transform:translateY(0)}
+.btn-primary:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.alert{padding:12px 14px;border-radius:8px;font-size:0.88rem;margin-bottom:18px;display:none;align-items:center;gap:8px}
+.alert.show{display:flex}
+.alert-error{background:#fef2f2;border:1px solid #fecaca;color:#dc2626}
+.alert-success{background:#f0fdf4;border:1px solid #bbf7d0;color:#16a34a}
+.step{display:none}
+.step.active{display:block}
+.totp-inputs{display:flex;gap:8px;justify-content:center;margin:16px 0}
+.totp-inputs input{width:44px;height:52px;text-align:center;font-size:1.4rem;font-weight:700;padding:0;border-radius:8px}
+.footer-note{text-align:center;margin-top:20px;font-size:0.78rem;color:#aaa}
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.lock-icon{font-size:2.5rem;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="lock-icon">🔐</div>
+    <h1>IRS Financial Calculator</h1>
+    <p>Professional Tax Resolution Platform</p>
+  </div>
+
+  <div id="alert" class="alert alert-error"></div>
+
+  <!-- Step 1: Username + Password -->
+  <div id="step-login" class="step active">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" autocomplete="username" placeholder="Enter your username" autofocus>
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <div class="input-wrap">
+        <input type="password" id="password" autocomplete="current-password" placeholder="Enter your password">
+        <button class="toggle-pw" type="button" onclick="togglePw()">Show</button>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="btn-login" onclick="doLogin()">Sign In</button>
+    <div class="footer-note">Secure · Encrypted · Session-tracked</div>
+  </div>
+
+  <!-- Step 2: 2FA TOTP -->
+  <div id="step-2fa" class="step">
+    <p style="text-align:center;color:#555;margin-bottom:8px;font-size:.9rem">Enter the 6-digit code from your authenticator app</p>
+    <div class="totp-inputs" id="totp-boxes"></div>
+    <button class="btn btn-primary" id="btn-2fa" onclick="do2FA()">Verify</button>
+    <button class="btn" style="margin-top:10px;background:#f5f5f5;color:#666" onclick="backToLogin()">← Back</button>
+  </div>
+</div>
+
+<script>
+const API = '';  // same origin via nginx proxy
+let pending2faUserId = null;
+
+// Build 6 individual TOTP digit boxes
+const totpContainer = document.getElementById('totp-boxes');
+for (let i = 0; i < 6; i++) {
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.maxLength = 1; inp.inputMode = 'numeric'; inp.id = `t${i}`;
+  inp.addEventListener('input', e => {
+    if (e.target.value && i < 5) document.getElementById(`t${i+1}`).focus();
+    if (getTOTP().length === 6) do2FA();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !e.target.value && i > 0) document.getElementById(`t${i-1}`).focus();
+  });
+  inp.addEventListener('paste', e => {
+    e.preventDefault();
+    const val = e.clipboardData.getData('text').replace(/\D/g,'').slice(0,6);
+    [...val].forEach((c,j) => { const b = document.getElementById(`t${j}`); if(b) b.value=c; });
+    if (val.length === 6) do2FA();
+  });
+  totpContainer.appendChild(inp);
+}
+
+function getTOTP() { return Array.from({length:6},(_,i)=>document.getElementById(`t${i}`).value).join(''); }
+
+function showAlert(msg, type='error') {
+  const el = document.getElementById('alert');
+  el.textContent = msg;
+  el.className = `alert alert-${type} show`;
+}
+function hideAlert() { document.getElementById('alert').className = 'alert'; }
+function setLoading(id, loading, text='Sign In') {
+  const btn = document.getElementById(id);
+  btn.disabled = loading;
+  btn.innerHTML = loading ? `<span class="spinner"></span>Signing in…` : text;
+}
+function togglePw() {
+  const inp = document.getElementById('password');
+  const btn = document.querySelector('.toggle-pw');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.textContent = inp.type === 'password' ? 'Show' : 'Hide';
+}
+function showStep(id) {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function backToLogin() { pending2faUserId = null; showStep('step-login'); hideAlert(); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (document.getElementById('step-login').classList.contains('active')) doLogin();
+  }
+});
+
+async function doLogin() {
+  hideAlert();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) { showAlert('Please enter username and password'); return; }
+  setLoading('btn-login', true);
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAlert(data.error || 'Login failed'); return; }
+    if (data.require2fa) {
+      pending2faUserId = data.userId;
+      showStep('step-2fa');
+      document.getElementById('t0').focus();
+      return;
+    }
+    storeSession(data);
+    redirect(data.role);
+  } catch { showAlert('Network error — please try again'); }
+  finally { setLoading('btn-login', false); }
+}
+
+async function do2FA() {
+  hideAlert();
+  const token = getTOTP();
+  if (token.length < 6) { showAlert('Enter the complete 6-digit code'); return; }
+  const btn = document.getElementById('btn-2fa');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Verifying…';
+  try {
+    const res = await fetch(`${API}/api/verify-2fa`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: pending2faUserId, token })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAlert(data.error || '2FA verification failed'); return; }
+    storeSession(data);
+    redirect(data.role);
+  } catch { showAlert('Network error — please try again'); }
+  finally { btn.disabled = false; btn.textContent = 'Verify'; }
+}
+
+function storeSession(data) {
+  sessionStorage.setItem('irs_token', data.token);
+  sessionStorage.setItem('irs_role', data.role);
+  sessionStorage.setItem('irs_username', data.username);
+  sessionStorage.setItem('irs_userId', data.userId);
+}
+
+function redirect(role) {
+  // Everyone lands on the calculator app first.
+  // Admins can navigate to /admin.html from the top nav inside the app.
+  window.location.href = '/app.html';
+}
+
+// If already logged in, redirect immediately
+(async () => {
+  const token = sessionStorage.getItem('irs_token');
+  if (!token) return;
+  try {
+    const res = await fetch(`${API}/api/profile`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      const d = await res.json();
+      redirect(d.role);
+    } else {
+      sessionStorage.clear();
+    }
+  } catch {}
+})();
+</script>
+</body>
+</html>

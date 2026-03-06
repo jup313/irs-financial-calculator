@@ -1,0 +1,55 @@
+# ─── IRS Financial Calculator — Docker Compose (Local / Self-hosted) ──────────
+# Usage:
+#   1. cp .env.example .env
+#   2. Edit .env with your values
+#   3. docker compose up -d
+#
+# App will be available at: http://localhost (port 80)
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irs-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRY: ${JWT_EXPIRY:-8h}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      DB_PATH: /data/users.db
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-ChangeMe@First!}
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      FACEBOOK_GROUP_ID: ${FACEBOOK_GROUP_ID:-}
+    volumes:
+      - db-data:/data
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: irs-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  db-data:
+    driver: local

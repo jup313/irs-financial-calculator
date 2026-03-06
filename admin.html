@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard — IRS Calculator</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#333;display:flex;min-height:100vh}
+/* Sidebar */
+.sidebar{width:220px;background:linear-gradient(180deg,#1a1a2e,#16213e);color:#ccc;flex-shrink:0;display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;z-index:100}
+.sidebar-brand{padding:24px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sidebar-brand h2{color:#fff;font-size:1rem;font-weight:700}
+.sidebar-brand p{font-size:.72rem;color:#8899aa;margin-top:2px}
+.nav-item{padding:12px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:.88rem;transition:background .15s,color .15s;border-left:3px solid transparent}
+.nav-item:hover{background:rgba(255,255,255,.07);color:#fff}
+.nav-item.active{background:rgba(93,92,222,.25);color:#a8a7ff;border-left-color:#5D5CDE}
+.nav-item .icon{width:18px;text-align:center;font-size:1rem}
+.sidebar-footer{margin-top:auto;padding:16px 20px;border-top:1px solid rgba(255,255,255,.08)}
+.sidebar-user{font-size:.8rem;color:#8899aa;margin-bottom:8px}
+.sidebar-user strong{color:#ddd;display:block}
+.btn-logout{width:100%;padding:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#ccc;border-radius:6px;cursor:pointer;font-size:.82rem;transition:background .2s}
+.btn-logout:hover{background:rgba(255,80,80,.2);color:#ff9999}
+/* Main */
+.main{margin-left:220px;flex:1;padding:28px;overflow-y:auto}
+.page{display:none}.page.active{display:block}
+.page-title{font-size:1.4rem;font-weight:700;margin-bottom:4px;color:#1a1a2e}
+.page-sub{font-size:.85rem;color:#888;margin-bottom:24px}
+/* Stat cards */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.stat-card .label{font-size:.75rem;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat-card .value{font-size:2rem;font-weight:700;color:#1a1a2e}
+.stat-card .sub{font-size:.78rem;color:#aaa;margin-top:4px}
+.stat-card.accent .value{color:#5D5CDE}
+.stat-card.green  .value{color:#16a34a}
+.stat-card.red    .value{color:#dc2626}
+.stat-card.orange .value{color:#d97706}
+/* Tables */
+.table-card{background:#fff;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);overflow:hidden;margin-bottom:24px}
+.table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f0f0f0}
+.table-header h3{font-size:.95rem;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th,td{padding:11px 16px;text-align:left;font-size:.84rem}
+th{background:#f8f9fa;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.4px;font-size:.75rem}
+tr:not(:last-child) td{border-bottom:1px solid #f5f5f5}
+tr:hover td{background:#fafbff}
+.badge{display:inline-block;padding:2px 8px;border-radius:100px;font-size:.72rem;font-weight:600}
+.badge-admin{background:#ede9fe;color:#7c3aed}
+.badge-user{background:#e0f2fe;color:#0369a1}
+.badge-active{background:#dcfce7;color:#16a34a}
+.badge-inactive{background:#fee2e2;color:#dc2626}
+/* Buttons */
+.btn{padding:7px 14px;border-radius:7px;border:none;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-sm{padding:4px 10px;font-size:.78rem}
+.btn-primary{background:#5D5CDE;color:#fff}.btn-primary:hover{background:#4d4cbe}
+.btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca}.btn-danger:hover{background:#dc2626;color:#fff}
+.btn-secondary{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.btn-secondary:hover{background:#e2e8f0}
+.btn-success{background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0}.btn-success:hover{background:#16a34a;color:#fff}
+/* Modal */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:14px;padding:28px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal h3{font-size:1.1rem;font-weight:700;margin-bottom:20px;color:#1a1a2e}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:.8rem;font-weight:600;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.form-group input,.form-group select{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.9rem;outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group select:focus{border-color:#5D5CDE}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+/* Chart placeholder */
+.chart-bar-wrap{padding:16px 20px}
+.chart-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.chart-bar .day{font-size:.75rem;color:#888;width:72px;flex-shrink:0}
+.chart-bar .bar{height:20px;background:linear-gradient(90deg,#5D5CDE,#3498db);border-radius:4px;min-width:4px;transition:width .5s}
+.chart-bar .count{font-size:.78rem;color:#555;margin-left:4px}
+/* Log */
+.log-entry{display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid #f5f5f5;font-size:.82rem}
+.log-entry:last-child{border-bottom:none}
+.log-time{color:#aaa;white-space:nowrap;min-width:140px}
+.log-action{font-weight:600;color:#5D5CDE;min-width:160px}
+.log-user{color:#555;min-width:100px}
+.log-ip{color:#888}
+.action-login_success,.action-login_success_2fa{color:#16a34a}
+.action-login_failed,.action-2fa_failed{color:#dc2626}
+.action-create_user,.action-create_case{color:#7c3aed}
+.action-delete_user,.action-delete_case{color:#dc2626}
+.action-logout,.action-force_logout{color:#d97706}
+/* Search */
+.search-bar{padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.88rem;outline:none;width:220px;transition:border-color .2s}
+.search-bar:focus{border-color:#5D5CDE}
+.section-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.alert-banner{padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:.85rem;display:none}
+.alert-banner.show{display:block}
+.alert-banner.error{background:#fef2f2;border:1px solid #fecaca;color:#dc2626}
+.alert-banner.success{background:#f0fdf4;border:1px solid #bbf7d0;color:#16a34a}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h2>⚖️ IRS Calculator</h2>
+    <p>Admin Dashboard</p>
+  </div>
+  <nav>
+    <div class="nav-item active" data-page="analytics" onclick="showPage('analytics')"><span class="icon">📊</span> Analytics</div>
+    <div class="nav-item" data-page="users" onclick="showPage('users')"><span class="icon">👥</span> Users</div>
+    <div class="nav-item" data-page="sessions" onclick="showPage('sessions')"><span class="icon">🖥️</span> Active Sessions</div>
+    <div class="nav-item" data-page="audit" onclick="showPage('audit')"><span class="icon">📋</span> Audit Log</div>
+    <div class="nav-item" data-page="cases" onclick="showPage('cases')"><span class="icon">📁</span> All Cases</div>
+    <div class="nav-item" data-page="reports" onclick="showPage('reports')"><span class="icon">📈</span> Usage Reports</div>
+    <div class="nav-item" data-page="dbviewer" onclick="showPage('dbviewer')"><span class="icon">🗄️</span> Database Viewer</div>
+    <div class="nav-item" onclick="window.location.href='/app.html'"><span class="icon">🧮</span> Calculator</div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="sidebar-user">Signed in as<strong id="sb-username">—</strong></div>
+    <button class="btn-logout" onclick="logout()">Sign Out</button>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div id="alert-global" class="alert-banner"></div>
+
+  <!-- ANALYTICS PAGE -->
+  <div id="page-analytics" class="page active">
+    <div class="page-title">Analytics</div>
+    <div class="page-sub">Platform overview and login activity</div>
+    <div class="stats-grid">
+      <div class="stat-card accent"><div class="label">Total Users</div><div class="value" id="stat-total-users">—</div><div class="sub" id="stat-active-users"></div></div>
+      <div class="stat-card"><div class="label">Admins</div><div class="value" id="stat-admins">—</div></div>
+      <div class="stat-card green"><div class="label">Total Cases</div><div class="value" id="stat-cases">—</div><div class="sub" id="stat-active-cases"></div></div>
+      <div class="stat-card"><div class="label">Case Notes</div><div class="value" id="stat-notes">—</div></div>
+      <div class="stat-card red"><div class="label">Failed Logins (24h)</div><div class="value" id="stat-failed">—</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="table-card">
+        <div class="table-header"><h3>📈 Logins — Last 30 Days</h3></div>
+        <div class="chart-bar-wrap" id="chart-logins"><div style="color:#aaa;font-size:.85rem;padding:8px">Loading…</div></div>
+      </div>
+      <div class="table-card">
+        <div class="table-header"><h3>🏆 Most Active Users</h3></div>
+        <table><thead><tr><th>Username</th><th>Login Count</th></tr></thead>
+        <tbody id="top-users-body"></tbody></table>
+      </div>
+    </div>
+
+    <div class="table-card" style="margin-top:20px">
+      <div class="table-header"><h3>🔴 Recent Logins</h3></div>
+      <table><thead><tr><th>Username</th><th>IP</th><th>User Agent</th><th>Time</th></tr></thead>
+      <tbody id="recent-logins-body"></tbody></table>
+    </div>
+  </div>
+
+  <!-- USERS PAGE -->
+  <div id="page-users" class="page">
+    <div class="page-title">User Management</div>
+    <div class="page-sub">Create, edit and remove user accounts</div>
+    <div class="section-row">
+      <input class="search-bar" type="text" placeholder="Search users…" oninput="filterUsers(this.value)">
+      <button class="btn btn-primary" onclick="openCreateUser()">+ New User</button>
+    </div>
+    <div class="table-card">
+      <table>
+        <thead><tr><th>Username</th><th>Full Name</th><th>Email</th><th>Role</th><th>Status</th><th>Logins</th><th>Last Login</th><th>Actions</th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SESSIONS PAGE -->
+  <div id="page-sessions" class="page">
+    <div class="page-title">Active Sessions</div>
+    <div class="page-sub">All currently logged-in users</div>
+    <div class="table-card">
+      <table>
+        <thead><tr><th>Username</th><th>IP Address</th><th>Browser / Client</th><th>Logged In</th><th>Expires</th><th>Action</th></tr></thead>
+        <tbody id="sessions-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- AUDIT LOG PAGE -->
+  <div id="page-audit" class="page">
+    <div class="page-title">Audit Log</div>
+    <div class="page-sub">Every significant action performed in the system</div>
+    <div class="section-row">
+      <input class="search-bar" type="text" placeholder="Filter by user/action…" oninput="filterAudit(this.value)">
+      <button class="btn btn-secondary" onclick="loadAudit()">↻ Refresh</button>
+    </div>
+    <div class="table-card" style="overflow-x:auto">
+      <div id="audit-log-body"></div>
+    </div>
+  </div>
+
+  <!-- CASES PAGE -->
+  <div id="page-cases" class="page">
+    <div class="page-title">All Client Cases</div>
+    <div class="page-sub">Overview of every case across all users</div>
+    <div class="table-card">
+      <table>
+        <thead><tr><th>Client</th><th>Owner</th><th>Tax Year</th><th>IRS Balance</th><th>Status</th><th>Updated</th></tr></thead>
+        <tbody id="cases-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- USAGE REPORTS PAGE -->
+  <div id="page-reports" class="page">
+    <div class="page-title">Usage Reports</div>
+    <div class="page-sub">Activity and productivity per user</div>
+
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="loadReportUsers()">👤 Per-User Summary</button>
+      <button class="btn btn-secondary" onclick="loadReportLogins()">🔑 Login Activity</button>
+      <button class="btn btn-secondary" onclick="loadReportCases()">📁 Case Activity</button>
+      <button class="btn btn-secondary" id="btn-export-csv" onclick="exportCSV()" style="margin-left:auto">⬇ Export CSV</button>
+    </div>
+
+    <!-- Per-User Summary -->
+    <div id="report-users" class="table-card">
+      <div class="table-header"><h3>👤 Per-User Activity Summary</h3><span id="report-gen-time" style="font-size:.78rem;color:#aaa"></span></div>
+      <div style="overflow-x:auto">
+        <table id="report-users-table">
+          <thead><tr>
+            <th>Username</th><th>Full Name</th><th>Role</th><th>Status</th>
+            <th>Total Logins</th><th>Failed Logins</th><th>Actions (7d)</th>
+            <th>Cases</th><th>Active Cases</th><th>Notes</th><th>Files</th>
+            <th>Active Sessions</th><th>Last Login</th><th>Last IP</th>
+          </tr></thead>
+          <tbody id="report-users-body">
+            <tr><td colspan="14" style="text-align:center;padding:24px;color:#aaa">Click "Per-User Summary" to load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Login Activity -->
+    <div id="report-logins" class="table-card" style="margin-top:20px;display:none">
+      <div class="table-header"><h3>🔑 Login Activity — Last 30 Days</h3></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Date</th><th>Username</th><th>Logins</th><th>Bar</th></tr></thead>
+          <tbody id="report-logins-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Case Activity -->
+    <div id="report-cases-table" class="table-card" style="margin-top:20px;display:none">
+      <div class="table-header"><h3>📁 Case Activity</h3></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Client</th><th>Owner</th><th>Tax Year</th><th>IRS Balance</th><th>Status</th><th>Notes</th><th>Files</th><th>Created</th><th>Last Updated</th></tr></thead>
+          <tbody id="report-cases-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- DATABASE VIEWER PAGE -->
+  <div id="page-dbviewer" class="page">
+    <div class="page-title">Database Viewer</div>
+    <div class="page-sub">Browse, inspect and edit database records — admin only</div>
+
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <!-- Table list sidebar -->
+      <div style="width:170px;flex-shrink:0">
+        <div style="font-size:.75rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Tables</div>
+        <div id="db-table-list" style="display:flex;flex-direction:column;gap:4px">
+          <div style="color:#aaa;font-size:.82rem">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Main viewer panel -->
+      <div style="flex:1;min-width:0">
+        <div id="db-no-table" style="color:#aaa;font-size:.9rem;padding:40px 0;text-align:center">
+          Select a table to browse its data
+        </div>
+
+        <div id="db-viewer-panel" style="display:none">
+          <!-- Toolbar -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+            <h3 id="db-table-name" style="font-size:1rem;font-weight:700;color:#1a1a2e"></h3>
+            <span id="db-row-count" style="font-size:.78rem;color:#888;background:#f0f2f5;padding:3px 8px;border-radius:100px"></span>
+            <input id="db-search" class="search-bar" type="text" placeholder="Search…" style="width:180px" oninput="dbSearch(this.value)">
+            <button class="btn btn-secondary btn-sm" onclick="dbPrev()" id="db-prev">← Prev</button>
+            <span id="db-page-info" style="font-size:.8rem;color:#666"></span>
+            <button class="btn btn-secondary btn-sm" onclick="dbNext()" id="db-next">Next →</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadDbTable(dbState.table)" style="margin-left:auto">↻ Refresh</button>
+          </div>
+
+          <!-- Schema info toggle -->
+          <div style="margin-bottom:10px">
+            <button class="btn btn-secondary btn-sm" onclick="toggleSchema()">🔍 Schema</button>
+            <div id="db-schema-panel" style="display:none;margin-top:8px;background:#f8f9fa;border-radius:8px;padding:12px;font-size:.8rem;font-family:monospace">
+              <div id="db-schema-content"></div>
+            </div>
+          </div>
+
+          <!-- Data table -->
+          <div class="table-card" style="overflow-x:auto">
+            <table id="db-data-table">
+              <thead id="db-data-head"></thead>
+              <tbody id="db-data-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DB EDIT ROW MODAL -->
+  <div class="modal-bg" id="db-edit-modal">
+    <div class="modal" style="max-width:520px;max-height:85vh;overflow-y:auto">
+      <h3 id="db-edit-title">Edit Row</h3>
+      <div id="db-edit-alert" class="alert-banner"></div>
+      <div id="db-edit-fields"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeDbEdit()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveDbEdit()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- CREATE / EDIT USER MODAL -->
+<div class="modal-bg" id="user-modal">
+  <div class="modal">
+    <h3 id="modal-title">New User</h3>
+    <div id="modal-alert" class="alert-banner"></div>
+    <div class="form-group"><label>Username *</label><input id="m-username" type="text" placeholder="john.doe"></div>
+    <div class="form-group"><label>Full Name</label><input id="m-fullname" type="text" placeholder="John Doe"></div>
+    <div class="form-group"><label>Email</label><input id="m-email" type="email" placeholder="john@example.com"></div>
+    <div class="form-group" id="m-pw-group"><label>Password *</label><input id="m-password" type="password" placeholder="Min 8 characters"></div>
+    <div class="form-group"><label>Role</label>
+      <select id="m-role"><option value="user">User</option><option value="admin">Administrator</option></select>
+    </div>
+    <div class="form-group" id="m-status-group" style="display:none"><label>Status</label>
+      <select id="m-active"><option value="1">Active</option><option value="0">Disabled</option></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESET PASSWORD MODAL -->
+<div class="modal-bg" id="reset-modal">
+  <div class="modal">
+    <h3>Reset Password</h3>
+    <div id="reset-alert" class="alert-banner"></div>
+    <div class="form-group"><label>New Password *</label><input id="r-password" type="password" placeholder="Min 8 characters"></div>
+    <input type="hidden" id="r-userId">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeResetModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="doResetPassword()">Reset Password</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentUsers = [], currentAudit = [], editingUserId = null;
+
+function token() { return sessionStorage.getItem('irs_token'); }
+async function apiFetch(path, opts={}) {
+  const res = await fetch(API + path, { ...opts, headers: { 'Content-Type':'application/json', Authorization: `Bearer ${token()}`, ...(opts.headers||{}) } });
+  if (res.status === 401) { sessionStorage.clear(); window.location.href='/login.html'; }
+  return res;
+}
+
+function ts(unix) {
+  if (!unix) return '—';
+  return new Date(unix*1000).toLocaleString();
+}
+function uaShort(ua) {
+  if (!ua) return '—';
+  if (ua.includes('Chrome')) return 'Chrome';
+  if (ua.includes('Firefox')) return 'Firefox';
+  if (ua.includes('Safari')) return 'Safari';
+  if (ua.includes('curl')) return 'curl';
+  return ua.slice(0,30);
+}
+
+function showAlert(msg, type='error', id='alert-global') {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.className = `alert-banner show ${type}`;
+  setTimeout(() => el.className = 'alert-banner', 4000);
+}
+
+// ── Analytics
+async function loadAnalytics() {
+  const res = await apiFetch('/api/admin/analytics');
+  if (!res.ok) return;
+  const d = await res.json();
+  document.getElementById('stat-total-users').textContent = d.users.total;
+  document.getElementById('stat-active-users').textContent = `${d.users.active} active`;
+  document.getElementById('stat-admins').textContent = d.users.admins;
+  document.getElementById('stat-cases').textContent = d.cases.total;
+  document.getElementById('stat-active-cases').textContent = `${d.cases.active} active`;
+  document.getElementById('stat-notes').textContent = d.cases.notes;
+  document.getElementById('stat-failed').textContent = d.security.failedLoginsLast24h;
+
+  // Login chart
+  const chartEl = document.getElementById('chart-logins');
+  if (d.loginsByDay.length === 0) { chartEl.innerHTML = '<div style="color:#aaa;font-size:.85rem;padding:8px">No data yet</div>'; }
+  else {
+    const maxVal = Math.max(...d.loginsByDay.map(r=>r.logins));
+    chartEl.innerHTML = d.loginsByDay.slice(-14).map(r => `
+      <div class="chart-bar">
+        <div class="day">${r.day.slice(5)}</div>
+        <div class="bar" style="width:${Math.max(4, Math.round((r.logins/maxVal)*200))}px"></div>
+        <div class="count">${r.logins}</div>
+      </div>`).join('');
+  }
+
+  // Top users
+  document.getElementById('top-users-body').innerHTML = d.topUsers.map(u =>
+    `<tr><td><strong>${u.username}</strong></td><td>${u.login_count}</td></tr>`).join('');
+
+  // Recent logins
+  document.getElementById('recent-logins-body').innerHTML = d.recentLogins.map(s =>
+    `<tr><td><strong>${s.username}</strong></td><td>${s.ip||'—'}</td><td>${uaShort(s.user_agent)}</td><td>${ts(s.created_at)}</td></tr>`).join('');
+}
+
+// ── Users
+async function loadUsers() {
+  const res = await apiFetch('/api/admin/users');
+  if (!res.ok) return;
+  currentUsers = await res.json();
+  renderUsers(currentUsers);
+}
+
+function renderUsers(users) {
+  document.getElementById('users-body').innerHTML = users.map(u => `
+    <tr>
+      <td><strong>${u.username}</strong></td>
+      <td>${u.full_name||'—'}</td>
+      <td>${u.email||'—'}</td>
+      <td><span class="badge badge-${u.role}">${u.role}</span></td>
+      <td><span class="badge badge-${u.is_active?'active':'inactive'}">${u.is_active?'Active':'Disabled'}</span></td>
+      <td>${u.login_count||0}</td>
+      <td>${ts(u.last_login_at)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-secondary" onclick="openEditUser(${u.id})">Edit</button>
+        <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="openResetPw(${u.id})">Reset PW</button>
+        <button class="btn btn-sm btn-danger"    style="margin-left:4px" onclick="forceLogout(${u.id},'${u.username}')">Kick</button>
+        ${u.id !== myUserId() ? `<button class="btn btn-sm btn-danger" style="margin-left:4px" onclick="deleteUser(${u.id},'${u.username}')">Delete</button>` : ''}
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:24px">No users found</td></tr>';
+}
+
+function filterUsers(q) {
+  const f = q.toLowerCase();
+  renderUsers(currentUsers.filter(u => u.username.includes(f) || (u.full_name||'').toLowerCase().includes(f) || (u.email||'').includes(f)));
+}
+
+function myUserId() { return parseInt(sessionStorage.getItem('irs_userId')||'0'); }
+
+function openCreateUser() {
+  editingUserId = null;
+  document.getElementById('modal-title').textContent = 'New User';
+  document.getElementById('modal-save-btn').textContent = 'Create User';
+  document.getElementById('m-username').value = '';
+  document.getElementById('m-fullname').value = '';
+  document.getElementById('m-email').value = '';
+  document.getElementById('m-password').value = '';
+  document.getElementById('m-role').value = 'user';
+  document.getElementById('m-pw-group').style.display = '';
+  document.getElementById('m-status-group').style.display = 'none';
+  document.getElementById('modal-alert').className = 'alert-banner';
+  document.getElementById('user-modal').classList.add('open');
+}
+
+function openEditUser(id) {
+  const u = currentUsers.find(x => x.id === id);
+  if (!u) return;
+  editingUserId = id;
+  document.getElementById('modal-title').textContent = `Edit: ${u.username}`;
+  document.getElementById('modal-save-btn').textContent = 'Save Changes';
+  document.getElementById('m-username').value = u.username;
+  document.getElementById('m-fullname').value = u.full_name||'';
+  document.getElementById('m-email').value = u.email||'';
+  document.getElementById('m-password').value = '';
+  document.getElementById('m-role').value = u.role;
+  document.getElementById('m-active').value = u.is_active ? '1' : '0';
+  document.getElementById('m-pw-group').style.display = 'none';
+  document.getElementById('m-status-group').style.display = '';
+  document.getElementById('modal-alert').className = 'alert-banner';
+  document.getElementById('user-modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('user-modal').classList.remove('open'); }
+
+async function saveUser() {
+  const username  = document.getElementById('m-username').value.trim();
+  const full_name = document.getElementById('m-fullname').value.trim();
+  const email     = document.getElementById('m-email').value.trim();
+  const password  = document.getElementById('m-password').value;
+  const role      = document.getElementById('m-role').value;
+  const is_active = document.getElementById('m-active').value === '1';
+
+  if (editingUserId) {
+    const res = await apiFetch(`/api/admin/users/${editingUserId}`, {
+      method: 'PUT', body: JSON.stringify({ full_name, email, role, is_active })
+    });
+    const d = await res.json();
+    if (!res.ok) { showAlert(d.error, 'error', 'modal-alert'); return; }
+    showAlert('User updated', 'success'); closeModal(); loadUsers();
+  } else {
+    if (!username || !password) { showAlert('Username and password required', 'error', 'modal-alert'); return; }
+    const res = await apiFetch('/api/admin/users', {
+      method: 'POST', body: JSON.stringify({ username, full_name, email, password, role })
+    });
+    const d = await res.json();
+    if (!res.ok) { showAlert(d.error, 'error', 'modal-alert'); return; }
+    showAlert('User created', 'success'); closeModal(); loadUsers();
+  }
+}
+
+function openResetPw(id) {
+  document.getElementById('r-userId').value = id;
+  document.getElementById('r-password').value = '';
+  document.getElementById('reset-alert').className = 'alert-banner';
+  document.getElementById('reset-modal').classList.add('open');
+}
+function closeResetModal() { document.getElementById('reset-modal').classList.remove('open'); }
+async function doResetPassword() {
+  const id = document.getElementById('r-userId').value;
+  const pw = document.getElementById('r-password').value;
+  if (!pw) { showAlert('Password required', 'error', 'reset-alert'); return; }
+  const res = await apiFetch(`/api/admin/users/${id}/reset-password`, { method:'POST', body: JSON.stringify({new_password:pw}) });
+  const d = await res.json();
+  if (!res.ok) { showAlert(d.error, 'error', 'reset-alert'); return; }
+  showAlert('Password reset — user sessions revoked', 'success'); closeResetModal(); loadUsers();
+}
+
+async function forceLogout(id, username) {
+  if (!confirm(`Force logout all sessions for ${username}?`)) return;
+  const res = await apiFetch(`/api/admin/users/${id}/sessions`, { method: 'DELETE' });
+  if (res.ok) showAlert(`${username} sessions revoked`, 'success');
+  else showAlert('Failed to revoke sessions', 'error');
+  loadSessions();
+}
+
+async function deleteUser(id, username) {
+  if (!confirm(`Permanently delete user "${username}" and all their data? This cannot be undone.`)) return;
+  const res = await apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+  if (res.ok) { showAlert(`User ${username} deleted`, 'success'); loadUsers(); }
+  else { const d = await res.json(); showAlert(d.error, 'error'); }
+}
+
+// ── Sessions
+async function loadSessions() {
+  const res = await apiFetch('/api/admin/sessions');
+  if (!res.ok) return;
+  const rows = await res.json();
+  document.getElementById('sessions-body').innerHTML = rows.map(s => `
+    <tr>
+      <td><strong>${s.username}</strong></td>
+      <td>${s.ip||'—'}</td>
+      <td>${uaShort(s.user_agent)}</td>
+      <td>${ts(s.created_at)}</td>
+      <td>${ts(s.expires_at)}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="revokeSession(${s.id})">Revoke</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:#aaa;padding:24px">No active sessions</td></tr>';
+}
+
+async function revokeSession(id) {
+  const res = await apiFetch(`/api/sessions/${id}`, { method: 'DELETE' });
+  if (res.ok) { showAlert('Session revoked', 'success'); loadSessions(); }
+}
+
+// ── Audit log
+async function loadAudit() {
+  const res = await apiFetch('/api/admin/audit?limit=200');
+  if (!res.ok) return;
+  const { rows } = await res.json();
+  currentAudit = rows;
+  renderAudit(rows);
+}
+
+function renderAudit(rows) {
+  document.getElementById('audit-log-body').innerHTML = rows.map(r => `
+    <div class="log-entry">
+      <div class="log-time">${ts(r.created_at)}</div>
+      <div class="log-action action-${r.action}">${r.action}</div>
+      <div class="log-user">${r.username||'—'}</div>
+      <div class="log-ip">${r.ip||'—'}</div>
+      <div style="color:#aaa;font-size:.78rem">${r.detail||''}</div>
+    </div>`).join('') || '<div style="padding:24px;text-align:center;color:#aaa">No log entries</div>';
+}
+
+function filterAudit(q) {
+  const f = q.toLowerCase();
+  renderAudit(currentAudit.filter(r =>
+    (r.username||'').toLowerCase().includes(f) || (r.action||'').includes(f) || (r.ip||'').includes(f)
+  ));
+}
+
+// ── Cases
+async function loadCases() {
+  const res = await apiFetch('/api/cases');
+  if (!res.ok) return;
+  const cases = await res.json();
+  document.getElementById('cases-body').innerHTML = cases.map(c => `
+    <tr>
+      <td><strong>${c.client_name}</strong>${c.client_email?`<br><span style="font-size:.78rem;color:#aaa">${c.client_email}</span>`:''}</td>
+      <td>${c.owner_username||'—'}</td>
+      <td>${c.tax_year||'—'}</td>
+      <td>$${(c.irs_balance||0).toLocaleString()}</td>
+      <td><span class="badge badge-${c.status==='active'?'active':'inactive'}">${c.status}</span></td>
+      <td>${ts(c.updated_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:#aaa;padding:24px">No cases yet</td></tr>';
+}
+
+// ── Logout
+async function logout() {
+  try { await apiFetch('/api/logout', { method: 'POST' }); } catch {}
+  sessionStorage.clear();
+  window.location.href = '/login.html';
+}
+
+// ════════════════════════════════════════════════════════
+// USAGE REPORTS
+// ════════════════════════════════════════════════════════
+let reportData = [];
+
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${id}`).classList.add('active');
+  document.querySelector(`[data-page="${id}"]`)?.classList.add('active');
+  if (id === 'analytics') loadAnalytics();
+  if (id === 'users')     loadUsers();
+  if (id === 'sessions')  loadSessions();
+  if (id === 'audit')     loadAudit();
+  if (id === 'cases')     loadCases();
+  if (id === 'reports')   loadReportUsers();
+  if (id === 'dbviewer')  loadDbTableList();
+}
+
+async function loadReportUsers() {
+  document.getElementById('report-logins').style.display = 'none';
+  document.getElementById('report-cases-table').style.display = 'none';
+  document.getElementById('report-users').style.display = '';
+  document.getElementById('report-gen-time').textContent = 'Generated: ' + new Date().toLocaleString();
+  const res = await apiFetch('/api/admin/reports/users');
+  if (!res.ok) return;
+  reportData = await res.json();
+  document.getElementById('report-users-body').innerHTML = reportData.map(u => `
+    <tr>
+      <td><strong>${u.username}</strong></td>
+      <td>${u.full_name||'—'}</td>
+      <td><span class="badge badge-${u.role}">${u.role}</span></td>
+      <td><span class="badge badge-${u.is_active?'active':'inactive'}">${u.is_active?'Active':'Disabled'}</span></td>
+      <td style="text-align:center">${u.logins_total||0}</td>
+      <td style="text-align:center;color:${u.login_failures>0?'#dc2626':'#888'}">${u.login_failures||0}</td>
+      <td style="text-align:center">
+        <span style="background:${u.actions_7d>0?'#ede9fe':'#f3f4f6'};color:${u.actions_7d>0?'#7c3aed':'#888'};padding:2px 8px;border-radius:100px;font-size:.78rem">${u.actions_7d||0}</span>
+      </td>
+      <td style="text-align:center">${u.cases_total||0}</td>
+      <td style="text-align:center;color:${u.cases_active>0?'#16a34a':'#888'}">${u.cases_active||0}</td>
+      <td style="text-align:center">${u.notes_written||0}</td>
+      <td style="text-align:center">${u.files_uploaded||0}</td>
+      <td style="text-align:center">
+        <span style="background:${u.active_sessions>0?'#dcfce7':'#f3f4f6'};color:${u.active_sessions>0?'#16a34a':'#888'};padding:2px 8px;border-radius:100px;font-size:.78rem">${u.active_sessions||0}</span>
+      </td>
+      <td style="font-size:.78rem">${ts(u.last_login_at)}</td>
+      <td style="font-size:.78rem;color:#888">${u.last_login_ip||'—'}</td>
+    </tr>`).join('') || '<tr><td colspan="14" style="text-align:center;padding:24px;color:#aaa">No data</td></tr>';
+}
+
+async function loadReportLogins() {
+  document.getElementById('report-users').style.display = 'none';
+  document.getElementById('report-cases-table').style.display = 'none';
+  document.getElementById('report-logins').style.display = '';
+  const res = await apiFetch('/api/admin/reports/logins');
+  if (!res.ok) return;
+  const rows = await res.json();
+  const maxVal = Math.max(...rows.map(r => r.logins), 1);
+  document.getElementById('report-logins-body').innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.day}</td>
+      <td><strong>${r.username}</strong></td>
+      <td>${r.logins}</td>
+      <td><div style="height:16px;background:linear-gradient(90deg,#5D5CDE,#3498db);border-radius:3px;width:${Math.max(6,Math.round((r.logins/maxVal)*200))}px"></div></td>
+    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:24px;color:#aaa">No login data yet</td></tr>';
+}
+
+async function loadReportCases() {
+  document.getElementById('report-users').style.display = 'none';
+  document.getElementById('report-logins').style.display = 'none';
+  document.getElementById('report-cases-table').style.display = '';
+  const res = await apiFetch('/api/admin/reports/cases');
+  if (!res.ok) return;
+  const rows = await res.json();
+  document.getElementById('report-cases-body').innerHTML = rows.map(c => `
+    <tr>
+      <td><strong>${c.client_name}</strong>${c.client_email?`<br><span style="font-size:.75rem;color:#aaa">${c.client_email}</span>`:''}</td>
+      <td>${c.owner}</td>
+      <td>${c.tax_year||'—'}</td>
+      <td>$${(c.irs_balance||0).toLocaleString()}</td>
+      <td><span class="badge badge-${c.status==='active'?'active':'inactive'}">${c.status}</span></td>
+      <td style="text-align:center">${c.note_count}</td>
+      <td style="text-align:center">${c.file_count}</td>
+      <td style="font-size:.78rem">${ts(c.created_at)}</td>
+      <td style="font-size:.78rem">${ts(c.updated_at)}</td>
+    </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;padding:24px;color:#aaa">No cases yet</td></tr>';
+}
+
+function exportCSV() {
+  if (!reportData.length) { showAlert('Load a report first', 'error'); return; }
+  const keys = Object.keys(reportData[0]);
+  const csv  = [keys.join(','), ...reportData.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `usage-report-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ════════════════════════════════════════════════════════
+// DATABASE VIEWER
+// ════════════════════════════════════════════════════════
+const dbState = { table: null, offset: 0, limit: 50, search: '', sort: 'rowid', dir: 'desc', total: 0, columns: [], editRowId: null, editData: {} };
+const READONLY_TABLES = ['sessions', 'audit_log'];
+
+async function loadDbTableList() {
+  const res = await apiFetch('/api/admin/db/tables');
+  if (!res.ok) return;
+  const tables = await res.json();
+  document.getElementById('db-table-list').innerHTML = tables.map(t => `
+    <div onclick="loadDbTable('${t}')"
+      style="padding:8px 12px;border-radius:7px;cursor:pointer;font-size:.84rem;border:1.5px solid transparent;transition:all .15s"
+      id="dbtab-${t}"
+      onmouseover="this.style.background='#ede9fe';this.style.borderColor='#c4b5fd'"
+      onmouseout="this.style.background=dbState.table==='${t}'?'#ede9fe':'';this.style.borderColor=dbState.table==='${t}'?'#5D5CDE':'transparent'">
+      ${READONLY_TABLES.includes(t) ? '🔒' : '📋'} ${t}
+      ${READONLY_TABLES.includes(t) ? '<span style="font-size:.65rem;color:#aaa;display:block">read-only</span>' : ''}
+    </div>`).join('');
+}
+
+async function loadDbTable(table, offset) {
+  dbState.table  = table;
+  dbState.offset = offset ?? 0;
+
+  // Highlight selected table
+  document.querySelectorAll('[id^="dbtab-"]').forEach(el => {
+    el.style.background = el.id === `dbtab-${table}` ? '#ede9fe' : '';
+    el.style.borderColor = el.id === `dbtab-${table}` ? '#5D5CDE' : 'transparent';
+  });
+
+  document.getElementById('db-no-table').style.display = 'none';
+  document.getElementById('db-viewer-panel').style.display = '';
+  document.getElementById('db-table-name').textContent = table;
+
+  // Load schema
+  const schRes = await apiFetch(`/api/admin/db/tables/${table}/schema`);
+  if (!schRes.ok) return;
+  const schema = await schRes.json();
+  dbState.columns = schema.columns.map(c => c.name);
+  document.getElementById('db-schema-content').innerHTML =
+    schema.columns.map(c => `<div style="margin-bottom:3px"><span style="color:#5D5CDE">${c.name}</span> <span style="color:#888">${c.type||'TEXT'}</span>${c.pk?' <span style="color:#f59e0b">PK</span>':''}</div>`).join('');
+
+  // Load rows
+  const params = new URLSearchParams({
+    limit: dbState.limit, offset: dbState.offset,
+    sort: dbState.sort, dir: dbState.dir,
+    ...(dbState.search ? { search: dbState.search } : {})
+  });
+  const res = await apiFetch(`/api/admin/db/tables/${table}/rows?${params}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  dbState.total   = data.total;
+  dbState.columns = data.columns;
+
+  document.getElementById('db-row-count').textContent = `${data.total} rows`;
+  document.getElementById('db-page-info').textContent =
+    `${dbState.offset + 1}–${Math.min(dbState.offset + dbState.limit, data.total)} of ${data.total}`;
+  document.getElementById('db-prev').disabled = dbState.offset === 0;
+  document.getElementById('db-next').disabled = dbState.offset + dbState.limit >= data.total;
+
+  // Render table header
+  const isReadonly = READONLY_TABLES.includes(table);
+  document.getElementById('db-data-head').innerHTML = `<tr>
+    <th style="width:40px">#</th>
+    ${data.columns.map(c => `<th style="cursor:pointer" onclick="dbSort('${c}')">${c} ${dbState.sort===c?(dbState.dir==='desc'?'↓':'↑'):''}</th>`).join('')}
+    ${!isReadonly ? '<th>Actions</th>' : ''}
+  </tr>`;
+
+  // Render rows
+  document.getElementById('db-data-body').innerHTML = data.rows.map((row, i) => {
+    const rowid = row.id || row.rowid || (dbState.offset + i + 1);
+    const cells = data.columns.map(col => {
+      let val = row[col];
+      // Mask sensitive fields
+      if (['password_hash','totp_secret'].includes(col)) return `<td style="color:#ccc;font-style:italic">••••••••</td>`;
+      // Format unix timestamps
+      if (['created_at','updated_at','last_login_at','locked_until','expires_at'].includes(col) && val > 1_000_000_000) {
+        return `<td title="${val}">${new Date(val*1000).toLocaleString()}</td>`;
+      }
+      if (val === null || val === undefined) return `<td style="color:#ccc;font-style:italic">null</td>`;
+      // Truncate long strings
+      const str = String(val);
+      const display = str.length > 60 ? `<span title="${str.replace(/"/g,'&quot;')}">${str.slice(0,57)}…</span>` : str;
+      return `<td>${display}</td>`;
+    }).join('');
+    const actions = !isReadonly ? `<td style="white-space:nowrap">
+      <button class="btn btn-sm btn-secondary" onclick="openDbEdit(${JSON.stringify(row).replace(/'/g,"&apos;")}, '${table}')">Edit</button>
+      <button class="btn btn-sm btn-danger" style="margin-left:4px" onclick="deleteDbRow('${table}', ${rowid})">Del</button>
+    </td>` : '';
+    return `<tr>${cells}${actions}</tr>`;
+  }).join('') || `<tr><td colspan="${data.columns.length + (isReadonly ? 1 : 2)}" style="text-align:center;padding:24px;color:#aaa">No rows</td></tr>`;
+}
+
+function dbSearch(val) {
+  dbState.search = val;
+  dbState.offset = 0;
+  if (dbState.table) loadDbTable(dbState.table, 0);
+}
+function dbSort(col) {
+  if (dbState.sort === col) dbState.dir = dbState.dir === 'desc' ? 'asc' : 'desc';
+  else { dbState.sort = col; dbState.dir = 'desc'; }
+  loadDbTable(dbState.table, dbState.offset);
+}
+function dbPrev() { if (dbState.offset >= dbState.limit) loadDbTable(dbState.table, dbState.offset - dbState.limit); }
+function dbNext() { if (dbState.offset + dbState.limit < dbState.total) loadDbTable(dbState.table, dbState.offset + dbState.limit); }
+function toggleSchema() {
+  const p = document.getElementById('db-schema-panel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+
+function openDbEdit(row, table) {
+  dbState.editRowId = row.id || row.rowid;
+  dbState.editData  = row;
+  document.getElementById('db-edit-title').textContent = `Edit row in "${table}"`;
+  document.getElementById('db-edit-alert').className = 'alert-banner';
+  const PROTECTED = ['password_hash','totp_secret'];
+  document.getElementById('db-edit-fields').innerHTML = Object.entries(row)
+    .filter(([k]) => !PROTECTED.includes(k))
+    .map(([k, v]) => `
+      <div class="form-group">
+        <label>${k}</label>
+        <input id="dbedit-${k}" type="text" value="${String(v ?? '').replace(/"/g,'&quot;')}"
+          style="${k==='id'?'background:#f5f5f5;color:#aaa':''}" ${k==='id'?'readonly':''}>
+      </div>`).join('');
+  document.getElementById('db-edit-modal').classList.add('open');
+}
+function closeDbEdit() { document.getElementById('db-edit-modal').classList.remove('open'); }
+
+async function saveDbEdit() {
+  const updates = {};
+  document.querySelectorAll('#db-edit-fields input:not([readonly])').forEach(inp => {
+    const key = inp.id.replace('dbedit-', '');
+    updates[key] = inp.value;
+  });
+  const res = await apiFetch(`/api/admin/db/tables/${dbState.table}/rows/${dbState.editRowId}`, {
+    method: 'PUT', body: JSON.stringify(updates)
+  });
+  const d = await res.json();
+  if (!res.ok) { showAlert(d.error, 'error', 'db-edit-alert'); return; }
+  showAlert('Row updated', 'success');
+  closeDbEdit();
+  loadDbTable(dbState.table, dbState.offset);
+}
+
+async function deleteDbRow(table, rowid) {
+  if (!confirm(`Delete row ${rowid} from "${table}"? This cannot be undone.`)) return;
+  const res = await apiFetch(`/api/admin/db/tables/${table}/rows/${rowid}`, { method: 'DELETE' });
+  const d = await res.json();
+  if (!res.ok) { showAlert(d.error, 'error'); return; }
+  showAlert('Row deleted', 'success');
+  loadDbTable(table, dbState.offset);
+}
+
+// ── Init: verify auth + require admin
+(async () => {
+  const t = token();
+  if (!t) { window.location.href = '/login.html'; return; }
+  try {
+    const res = await apiFetch('/api/profile');
+    if (!res.ok) { sessionStorage.clear(); window.location.href = '/login.html'; return; }
+    const user = await res.json();
+    if (user.role !== 'admin') { window.location.href = '/app.html'; return; }
+    document.getElementById('sb-username').textContent = user.username;
+    loadAnalytics();
+  } catch { window.location.href = '/login.html'; }
+})();
+</script>
+</body>
+</html>
