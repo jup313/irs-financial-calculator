@@ -1899,10 +1899,18 @@ app.post('/api/admin/restore/db', requireAuth, requireAdmin, (req, res) => {
         // Step 1: Flush WAL
         await new Promise(resolve => db.run('PRAGMA wal_checkpoint(TRUNCATE)', resolve));
 
-        // Step 2: Copy the new DB file over the current one
-        fs.copyFileSync(tmpPath, dbPath);
+        // Step 2: Atomic rename — both files are in /data so same filesystem.
+        // rename() is atomic and works even if dbPath is owned by a different user
+        // as long as we own the DIRECTORY (which appuser does for /data).
+        // This avoids the EPERM error from copyFileSync trying to overwrite a root-owned file.
+        try {
+          fs.renameSync(tmpPath, dbPath);
+        } catch(renameErr) {
+          // Fallback: if rename fails (cross-device), try copy then unlink
+          fs.copyFileSync(tmpPath, dbPath);
+          fs.unlinkSync(tmpPath);
+        }
         fs.chmodSync(dbPath, 0o666);
-        fs.unlink(tmpPath, () => {});
 
         log.info({ by: req.user.username, size: size }, 'DB restore from file complete — restarting process');
 
