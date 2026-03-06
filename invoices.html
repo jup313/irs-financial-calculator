@@ -1915,12 +1915,18 @@ function signOut() {
     const user = await res.json();
     document.getElementById('nav-user').textContent = user.username;
     if (user.role==='admin') document.getElementById('btn-admin-link').style.display='';
-    // Pre-load settings so fillFromSettings() works immediately
-    await loadSettings();
     initColorSwatches();
+    // Load dashboard and contacts immediately — do NOT await settings first
+    // Settings may be slow if a large logo is stored (base64); load it in background
     loadDashboard();
     loadContacts();
-  } catch { window.location.href='/login.html'; }
+    // Load settings in background so the form works when the user navigates to it
+    loadSettings().catch(e => console.warn('Settings load failed:', e.message));
+  } catch(e) {
+    console.error('Init error:', e.message);
+    // Only redirect to login if it is genuinely a 401, not a slow settings response
+    window.location.href='/login.html';
+  }
 })();
 </script>
 </body>

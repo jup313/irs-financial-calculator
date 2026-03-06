@@ -1274,10 +1274,17 @@ app.get('/api/email/settings', requireAuth, async (req, res) => {
   try {
     const row = await dbGet('SELECT * FROM email_settings WHERE user_id=?', [req.user.userId]);
     if (!row) return res.json({});
-    // Never return passwords to client
     const safe = { ...row };
+    // Mask passwords
     if (safe.smtp_pass) safe.smtp_pass = '••••••••';
     if (safe.imap_pass) safe.imap_pass = '••••••••';
+    // If the logo is a large base64 data URL (stored from file upload),
+    // strip it from the response to avoid sending 100KB+ on every settings load.
+    // The frontend will re-upload or use the URL field instead.
+    if (safe.business_logo_url && safe.business_logo_url.startsWith('data:')) {
+      safe.business_logo_url = '';  // don't send base64 back — too large
+      safe._has_logo = true;        // let the client know a logo exists
+    }
     res.json(safe);
   } catch (err) { res.status(500).json({ error: 'Failed to load settings' }); }
 });
