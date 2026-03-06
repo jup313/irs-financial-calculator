@@ -156,6 +156,22 @@ async function initDb() {
     created_at       INTEGER DEFAULT (strftime('%s','now'))
   )`);
 
+  // ── Contacts — standalone client list (used when no case exists)
+  await dbRun(`CREATE TABLE IF NOT EXISTS contacts (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    full_name        TEXT    NOT NULL,
+    email            TEXT,
+    phone            TEXT,
+    address          TEXT,
+    company          TEXT,
+    notes            TEXT,
+    created_at       INTEGER DEFAULT (strftime('%s','now')),
+    updated_at       INTEGER DEFAULT (strftime('%s','now'))
+  )`);
+
+  await dbRun(`CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_id)`);
+
   // ── Email settings — one row per user (SMTP outbound + optional IMAP)
   await dbRun(`CREATE TABLE IF NOT EXISTS email_settings (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -269,12 +285,13 @@ async function initDb() {
   // Seed first admin if no users exist
   const count = await dbGet('SELECT COUNT(*) AS n FROM users');
   if (count.n === 0) {
-    const defaultPass = process.env.DEFAULT_ADMIN_PASSWORD || 'ChangeMe@First!'; const hash = await bcrypt.hash(defaultPass, BCRYPT_ROUNDS);
+    const defaultPass = process.env.DEFAULT_ADMIN_PASSWORD || 'ChangeMe@First!';
+    const hash = await bcrypt.hash(defaultPass, BCRYPT_ROUNDS);
     await dbRun(
       `INSERT INTO users (username, full_name, password_hash, role) VALUES (?,?,?,?)`,
       ['admin', 'System Administrator', hash, 'admin']
     );
-    log.warn('Default admin seeded — CHANGE THE PASSWORD IMMEDIATELY after first login');
+    log.warn('Default admin account seeded — CHANGE THE PASSWORD IMMEDIATELY after first login');
   }
 
   // Indexes for performance
@@ -1334,9 +1351,9 @@ app.post('/api/email/test', requireAuth, async (req, res) => {
   }
 });
 
-// Send a free-form email to a customer
+// Send a free-form email to a customer (supports cc, bcc, multiple recipients)
 app.post('/api/email/send', requireAuth, async (req, res) => {
-  const { to, subject, body_html, body_text } = req.body ?? {};
+  const { to, cc, bcc, subject, body_html, body_text } = req.body ?? {};
   if (!to || !subject) return res.status(400).json({ error: 'to and subject are required' });
 
   try {
@@ -1354,10 +1371,15 @@ app.post('/api/email/send', requireAuth, async (req, res) => {
       ? `"${cfg.smtp_from_name || cfg.business_name || 'IRS Calculator'}" <${cfg.smtp_from_email}>`
       : cfg.smtp_user;
 
-    await transporter.sendMail({ from, to, subject, html: body_html || body_text, text: body_text || body_html });
+    const mailOptions = { from, to, subject, html: body_html || body_text, text: body_text || body_html };
+    if (cc)  mailOptions.cc  = cc;
+    if (bcc) mailOptions.bcc = bcc;
+
+    await transporter.sendMail(mailOptions);
+    const allRecipients = [to, cc, bcc].filter(Boolean).join(', ');
     await dbRun('INSERT INTO email_log (user_id,recipient,subject,status) VALUES (?,?,?,?)',
-      [req.user.userId, to, subject, 'sent']);
-    await audit(req.user.userId, req.user.username, 'send_email', 'email', null, req.ip, req.headers['user-agent'], `To: ${to}`);
+      [req.user.userId, allRecipients, subject, 'sent']);
+    await audit(req.user.userId, req.user.username, 'send_email', 'email', null, req.ip, req.headers['user-agent'], `To: ${allRecipients}`);
     res.json({ success: true });
   } catch (err) {
     await dbRun('INSERT INTO email_log (user_id,recipient,subject,status,error_msg) VALUES (?,?,?,?,?)',
@@ -1537,7 +1559,7 @@ app.post('/api/invoices/:id/send', requireAuth, async (req, res) => {
     const cfg   = await dbGet('SELECT * FROM email_settings WHERE user_id=?', [req.user.userId]);
     if (!cfg?.smtp_host) return res.status(400).json({ error: 'Configure SMTP settings before sending invoices' });
 
-    const { to, subject, message } = req.body ?? {};
+    const { to, cc, bcc, subject, message } = req.body ?? {};
     const recipient = to || inv.client_email;
     if (!recipient) return res.status(400).json({ error: 'No recipient email address — provide "to" or set client_email on invoice' });
 
@@ -1557,15 +1579,20 @@ app.post('/api/invoices/:id/send', requireAuth, async (req, res) => {
       ? `"${cfg.smtp_from_name || cfg.business_name || 'IRS Calculator'}" <${cfg.smtp_from_email}>`
       : cfg.smtp_user;
 
-    await transporter.sendMail({ from, to: recipient, subject: emailSubject, html: htmlInvoice });
+    const mailOptions = { from, to: recipient, subject: emailSubject, html: htmlInvoice };
+    if (cc)  mailOptions.cc  = cc;
+    if (bcc) mailOptions.bcc = bcc;
 
+    await transporter.sendMail(mailOptions);
+
+    const allRecipients = [recipient, cc, bcc].filter(Boolean).join(', ');
     // Update invoice status and send count
     await dbRun(`UPDATE invoices SET status=CASE WHEN status='draft' THEN 'sent' ELSE status END,
       last_sent_at=strftime('%s','now'), sent_count=sent_count+1, updated_at=strftime('%s','now') WHERE id=?`,
       [req.params.id]);
     await dbRun('INSERT INTO email_log (user_id,recipient,subject,invoice_id,status) VALUES (?,?,?,?,?)',
-      [req.user.userId, recipient, emailSubject, req.params.id, 'sent']);
-    await audit(req.user.userId, req.user.username, 'send_invoice', 'invoice', parseInt(req.params.id), req.ip, req.headers['user-agent'], `To: ${recipient}`);
+      [req.user.userId, allRecipients, emailSubject, req.params.id, 'sent']);
+    await audit(req.user.userId, req.user.username, 'send_invoice', 'invoice', parseInt(req.params.id), req.ip, req.headers['user-agent'], `To: ${allRecipients}`);
     res.json({ success: true });
   } catch (err) {
     log.error({ err: err.message }, 'send invoice failed');
@@ -1681,6 +1708,216 @@ function buildInvoiceHtml(inv, items, cfg, customMessage) {
   </div>
 </div></body></html>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/contacts', requireAuth, async (req, res) => {
+  try {
+    const isAdmin = req.user.role === 'admin';
+    const rows = await dbAll(
+      isAdmin
+        ? `SELECT c.*, u.username AS owner_username FROM contacts c JOIN users u ON u.id=c.owner_id ORDER BY c.full_name`
+        : `SELECT * FROM contacts WHERE owner_id=? ORDER BY full_name`,
+      isAdmin ? [] : [req.user.userId]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch contacts' }); }
+});
+
+app.post('/api/contacts', requireAuth, async (req, res) => {
+  const { full_name, email, phone, address, company, notes } = req.body ?? {};
+  if (!full_name?.trim()) return res.status(400).json({ error: 'full_name is required' });
+  try {
+    const r = await dbRun(
+      `INSERT INTO contacts (owner_id,full_name,email,phone,address,company,notes) VALUES (?,?,?,?,?,?,?)`,
+      [req.user.userId, full_name.trim(), email||null, phone||null, address||null, company||null, notes||null]
+    );
+    await audit(req.user.userId, req.user.username, 'create_contact', 'contact', r.lastID, req.ip, req.headers['user-agent'], full_name.trim());
+    res.status(201).json({ success: true, contactId: r.lastID });
+  } catch (err) {
+    log.error({ err: err.message }, 'create contact failed');
+    res.status(500).json({ error: 'Failed to create contact' });
+  }
+});
+
+app.put('/api/contacts/:id', requireAuth, async (req, res) => {
+  try {
+    const c = await dbGet('SELECT * FROM contacts WHERE id=?', [req.params.id]);
+    if (!c) return res.status(404).json({ error: 'Contact not found' });
+    if (req.user.role !== 'admin' && c.owner_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
+    const { full_name, email, phone, address, company, notes } = req.body ?? {};
+    await dbRun(
+      `UPDATE contacts SET full_name=?,email=?,phone=?,address=?,company=?,notes=?,updated_at=strftime('%s','now') WHERE id=?`,
+      [full_name??c.full_name, email??c.email, phone??c.phone, address??c.address, company??c.company, notes??c.notes, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to update contact' }); }
+});
+
+app.delete('/api/contacts/:id', requireAuth, async (req, res) => {
+  try {
+    const c = await dbGet('SELECT * FROM contacts WHERE id=?', [req.params.id]);
+    if (!c) return res.status(404).json({ error: 'Contact not found' });
+    if (req.user.role !== 'admin' && c.owner_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
+    await dbRun('DELETE FROM contacts WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to delete contact' }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BACKUP & RESTORE  (admin only)
+// ═══════════════════════════════════════════════════════════════════════════════
+const zlib = require('zlib');
+
+// ── Full JSON backup — all tables + settings exported as compressed JSON
+app.get('/api/admin/backup', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const tables = await dbAll(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+    );
+
+    const backup = {
+      version: '1.0',
+      created_at: new Date().toISOString(),
+      app: 'irs-financial-calculator',
+      tables: {}
+    };
+
+    for (const { name } of tables) {
+      // Never export raw passwords or TOTP secrets
+      let rows;
+      if (name === 'users') {
+        rows = await dbAll(`SELECT id,username,email,full_name,role,is_active,is_2fa_enabled,
+          created_at,created_by,last_login_at,last_login_ip,login_count,failed_logins,locked_until
+          FROM users`);
+      } else if (name === 'email_settings') {
+        rows = await dbAll(`SELECT id,user_id,smtp_host,smtp_port,smtp_secure,smtp_user,
+          smtp_from_name,smtp_from_email,imap_host,imap_port,imap_secure,imap_user,
+          business_name,business_address,business_phone,business_website,business_logo_url,
+          business_email,business_footer,updated_at FROM email_settings`);
+      } else {
+        rows = await dbAll(`SELECT * FROM ${name}`);
+      }
+      backup.tables[name] = rows;
+    }
+
+    const json    = JSON.stringify(backup, null, 2);
+    const filename = `irs-backup-${new Date().toISOString().slice(0,10)}.json`;
+
+    await audit(req.user.userId, req.user.username, 'backup_export', 'system', null, req.ip, req.headers['user-agent'],
+      `Tables: ${tables.map(t=>t.name).join(', ')}`);
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(json);
+  } catch (err) {
+    log.error({ err: err.message }, 'backup failed');
+    res.status(500).json({ error: 'Backup failed: ' + err.message });
+  }
+});
+
+// ── SQLite raw database file backup (binary .db download)
+app.get('/api/admin/backup/db', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const fs = require('fs');
+    const dbPath = process.env.DB_PATH || '/data/users.db';
+
+    // Use SQLite VACUUM INTO to get a clean consistent snapshot
+    const tmpPath = dbPath + '.backup.tmp';
+    await dbRun(`VACUUM INTO '${tmpPath}'`);
+
+    const filename = `irs-database-${new Date().toISOString().slice(0,10)}.db`;
+    await audit(req.user.userId, req.user.username, 'backup_db_export', 'system', null, req.ip, req.headers['user-agent'], 'SQLite raw DB');
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    const stream = fs.createReadStream(tmpPath);
+    stream.pipe(res);
+    stream.on('end', () => fs.unlink(tmpPath, () => {}));
+    stream.on('error', (e) => { fs.unlink(tmpPath, () => {}); res.status(500).end(); });
+  } catch (err) {
+    log.error({ err: err.message }, 'db backup failed');
+    res.status(500).json({ error: 'DB backup failed: ' + err.message });
+  }
+});
+
+// ── Restore from JSON backup
+app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const backup = req.body;
+    if (!backup?.version || !backup?.tables || backup?.app !== 'irs-financial-calculator') {
+      return res.status(400).json({ error: 'Invalid backup file — must be an IRS Calculator backup JSON' });
+    }
+
+    const RESTORABLE = [
+      'client_cases', 'case_notes', 'case_files',
+      'contacts', 'invoices', 'invoice_items',
+      'email_settings', 'email_log'
+    ];
+    // Users table is intentionally NOT auto-restored to prevent privilege escalation
+    // It can be restored manually via the DB viewer if needed
+
+    const results = {};
+    for (const table of RESTORABLE) {
+      const rows = backup.tables[table];
+      if (!rows || !Array.isArray(rows)) { results[table] = 'skipped (not in backup)'; continue; }
+      if (rows.length === 0) { results[table] = 'empty'; continue; }
+
+      const cols = Object.keys(rows[0]);
+      let inserted = 0, skipped = 0;
+      for (const row of rows) {
+        const vals = cols.map(c => row[c]);
+        const placeholders = cols.map(() => '?').join(',');
+        await dbRun(
+          `INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`,
+          vals
+        ).then(() => inserted++).catch(() => skipped++);
+      }
+      results[table] = `${inserted} inserted, ${skipped} skipped (duplicates)`;
+    }
+
+    await audit(req.user.userId, req.user.username, 'restore_backup', 'system', null, req.ip, req.headers['user-agent'],
+      `From backup: ${backup.created_at}`);
+
+    log.info({ by: req.user.username }, 'backup restored');
+    res.json({ success: true, results, backup_date: backup.created_at });
+  } catch (err) {
+    log.error({ err: err.message }, 'restore failed');
+    res.status(500).json({ error: 'Restore failed: ' + err.message });
+  }
+});
+
+// ── Backup status — last backup time from audit log
+app.get('/api/admin/backup/status', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const lastBackup = await dbGet(
+      `SELECT created_at, username FROM audit_log
+       WHERE action IN ('backup_export','backup_db_export')
+       ORDER BY created_at DESC LIMIT 1`
+    );
+    const lastRestore = await dbGet(
+      `SELECT created_at, username FROM audit_log
+       WHERE action = 'restore_backup'
+       ORDER BY created_at DESC LIMIT 1`
+    );
+    const dbSize = await new Promise((resolve) => {
+      require('fs').stat(process.env.DB_PATH || '/data/users.db', (err, stat) => {
+        resolve(err ? 0 : stat.size);
+      });
+    });
+    const tableCounts = {};
+    const tables = await dbAll(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`);
+    for (const { name } of tables) {
+      const r = await dbGet(`SELECT COUNT(*) AS n FROM ${name}`);
+      tableCounts[name] = r.n;
+    }
+    res.json({ lastBackup, lastRestore, dbSizeBytes: dbSize, tableCounts });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get backup status' });
+  }
+});
 
 // ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

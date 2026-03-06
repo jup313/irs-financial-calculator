@@ -111,6 +111,7 @@ tr:hover td{background:#fafbff}
     <div class="nav-item" data-page="cases" onclick="showPage('cases')"><span class="icon">📁</span> All Cases</div>
     <div class="nav-item" data-page="reports" onclick="showPage('reports')"><span class="icon">📈</span> Usage Reports</div>
     <div class="nav-item" data-page="dbviewer" onclick="showPage('dbviewer')"><span class="icon">🗄️</span> Database Viewer</div>
+    <div class="nav-item" data-page="backup" onclick="showPage('backup')"><span class="icon">💾</span> Backup & Restore</div>
     <div class="nav-item" onclick="window.location.href='/app.html'"><span class="icon">🧮</span> Calculator</div>
   </nav>
   <div class="sidebar-footer">
@@ -324,6 +325,85 @@ tr:hover td{background:#fafbff}
       </div>
     </div>
   </div>
+  <!-- BACKUP & RESTORE PAGE -->
+  <div id="page-backup" class="page">
+    <div class="page-title">Backup &amp; Restore</div>
+    <div class="page-sub">Download a full backup of all data or restore from a previous backup</div>
+
+    <!-- Status Card -->
+    <div class="table-card" style="margin-bottom:20px">
+      <div class="table-header"><h3>📊 Database Status</h3><button class="btn btn-secondary btn-sm" onclick="loadBackupStatus()">↻ Refresh</button></div>
+      <div style="padding:16px 20px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">
+          <div class="stat-card"><div class="label">Database Size</div><div class="value accent" id="bk-db-size">—</div></div>
+          <div class="stat-card"><div class="label">Last Backup</div><div class="value" style="font-size:.9rem" id="bk-last-backup">—</div></div>
+          <div class="stat-card"><div class="label">Last Restore</div><div class="value" style="font-size:.9rem" id="bk-last-restore">—</div></div>
+        </div>
+        <div id="bk-table-counts" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      </div>
+    </div>
+
+    <!-- Backup Section -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div class="table-card">
+        <div class="table-header"><h3>⬇️ Download Backup</h3></div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="padding:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+            <div style="font-weight:700;color:#15803d;margin-bottom:4px">📄 JSON Backup (Recommended)</div>
+            <div style="font-size:.82rem;color:#555;margin-bottom:10px">Exports all data — cases, contacts, invoices, notes, email logs and settings — as a readable JSON file. Can be restored below. Passwords are <strong>not</strong> exported for security.</div>
+            <button class="btn btn-success" onclick="downloadBackup()">⬇️ Download JSON Backup</button>
+          </div>
+          <div style="padding:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
+            <div style="font-weight:700;color:#1d4ed8;margin-bottom:4px">🗄️ Raw Database File</div>
+            <div style="font-size:.82rem;color:#555;margin-bottom:10px">Downloads the raw SQLite <code>.db</code> file including all data and password hashes. Use for disaster recovery or migrating to a new server. Keep this file secure.</div>
+            <button class="btn" style="background:#dbeafe;color:#1d4ed8;border:1px solid #bfdbfe" onclick="downloadRawDb()">⬇️ Download .db File</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-header"><h3>⬆️ Restore from Backup</h3></div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="padding:12px;background:#fef9c3;border:1px solid #fde047;border-radius:8px;font-size:.82rem;color:#713f12">
+            ⚠️ <strong>Restore adds data — it does not delete existing records.</strong> Duplicates are skipped. User accounts are not restored via JSON (use DB file restore for full recovery). Always back up before restoring.
+          </div>
+          <div style="border:2px dashed #d0d0d0;border-radius:8px;padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#fafafa" id="restore-drop"
+            ondragover="event.preventDefault();this.style.borderColor='#5D5CDE';this.style.background='#f5f4ff'"
+            ondragleave="this.style.borderColor='#d0d0d0';this.style.background='#fafafa'"
+            ondrop="handleRestoreDrop(event)">
+            <input type="file" id="restore-file-input" accept=".json" onchange="handleRestoreFile(this)"
+              style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
+            <div style="font-size:2rem;margin-bottom:6px">📂</div>
+            <div style="font-weight:600;color:#555;font-size:.88rem">Drop JSON backup file here</div>
+            <div style="font-size:.75rem;color:#aaa;margin-top:3px">or click to browse</div>
+          </div>
+          <div id="restore-preview" style="display:none;padding:12px;background:#f8f9fa;border-radius:8px;font-size:.83rem"></div>
+          <button class="btn btn-primary" id="btn-do-restore" onclick="doRestore()" style="display:none">⬆️ Restore Selected Backup</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Restore Results -->
+    <div id="restore-results" style="display:none" class="table-card">
+      <div class="table-header"><h3>✅ Restore Results</h3></div>
+      <div style="padding:16px 20px" id="restore-results-body"></div>
+    </div>
+
+    <!-- Restore Instructions -->
+    <div class="table-card">
+      <div class="table-header"><h3>📖 Backup & Restore Guide</h3></div>
+      <div style="padding:16px 20px;font-size:.84rem;color:#555;line-height:1.7">
+        <p><strong>JSON Backup</strong> — Recommended for routine backups. Includes all client cases, contacts, invoices, notes, email history and settings. Does not include user passwords (by design). Restore by uploading the JSON file in the Restore panel.</p>
+        <br>
+        <p><strong>Raw .db File</strong> — Full SQLite database including user accounts and password hashes. Use for disaster recovery or full server migration. To restore a .db file: stop the container, replace <code>/data/users.db</code> on the QNAP volume, and restart.</p>
+        <br>
+        <p><strong>Scheduled Backups</strong> — Set a recurring calendar reminder to download a JSON backup weekly or monthly. Store backups in a secure, separate location.</p>
+        <br>
+        <p><strong>QNAP volume path:</strong> Container Station → Volumes → <code>irs-db</code> → Browse. The database file is at <code>users.db</code> inside the volume.</p>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- CREATE / EDIT USER MODAL -->
@@ -642,6 +722,7 @@ function showPage(id) {
   if (id === 'cases')     loadCases();
   if (id === 'reports')   loadReportUsers();
   if (id === 'dbviewer')  loadDbTableList();
+  if (id === 'backup')    loadBackupStatus();
 }
 
 async function loadReportUsers() {
@@ -875,6 +956,163 @@ async function deleteDbRow(table, rowid) {
   if (!res.ok) { showAlert(d.error, 'error'); return; }
   showAlert('Row deleted', 'success');
   loadDbTable(table, dbState.offset);
+}
+
+// ════════════════════════════════════════════════════════
+// BACKUP & RESTORE
+// ════════════════════════════════════════════════════════
+let pendingRestoreData = null;
+
+async function loadBackupStatus() {
+  const res = await apiFetch('/api/admin/backup/status');
+  if (!res.ok) return;
+  const d = await res.json();
+
+  // DB size
+  const kb = (d.dbSizeBytes / 1024).toFixed(1);
+  const mb = (d.dbSizeBytes / 1024 / 1024).toFixed(2);
+  document.getElementById('bk-db-size').textContent = d.dbSizeBytes > 1048576 ? mb + ' MB' : kb + ' KB';
+
+  // Last backup
+  document.getElementById('bk-last-backup').textContent = d.lastBackup
+    ? ts(d.lastBackup.created_at) + ' by ' + d.lastBackup.username
+    : 'Never';
+
+  // Last restore
+  document.getElementById('bk-last-restore').textContent = d.lastRestore
+    ? ts(d.lastRestore.created_at) + ' by ' + d.lastRestore.username
+    : 'Never';
+
+  // Table row counts
+  const countEl = document.getElementById('bk-table-counts');
+  countEl.innerHTML = Object.entries(d.tableCounts).map(([name, n]) => `
+    <span style="background:#f0f2f5;border:1px solid #e0e0e0;border-radius:100px;padding:3px 10px;font-size:.75rem;color:#555">
+      <strong>${name}</strong>: ${n.toLocaleString()} rows
+    </span>`).join('');
+}
+
+async function downloadBackup() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ Preparing…';
+  try {
+    const res = await apiFetch('/api/admin/backup');
+    if (!res.ok) { showAlert('Backup failed', 'error'); return; }
+    const blob = await res.blob();
+    const cd   = res.headers.get('content-disposition') || '';
+    const name = cd.match(/filename="([^"]+)"/)?.[1] || `irs-backup-${new Date().toISOString().slice(0,10)}.json`;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+    showAlert('Backup downloaded: ' + name, 'success');
+    loadBackupStatus();
+  } catch (e) { showAlert('Download failed: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = '⬇️ Download JSON Backup'; }
+}
+
+async function downloadRawDb() {
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ Preparing…';
+  try {
+    const res = await apiFetch('/api/admin/backup/db');
+    if (!res.ok) { showAlert('DB backup failed', 'error'); return; }
+    const blob = await res.blob();
+    const cd   = res.headers.get('content-disposition') || '';
+    const name = cd.match(/filename="([^"]+)"/)?.[1] || `irs-database-${new Date().toISOString().slice(0,10)}.db`;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+    showAlert('Database downloaded: ' + name + ' — store securely', 'success');
+    loadBackupStatus();
+  } catch (e) { showAlert('Download failed: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = '⬇️ Download .db File'; }
+}
+
+function handleRestoreDrop(event) {
+  event.preventDefault();
+  document.getElementById('restore-drop').style.borderColor = '#d0d0d0';
+  document.getElementById('restore-drop').style.background = '#fafafa';
+  const file = event.dataTransfer.files[0];
+  if (file) loadRestoreFile(file);
+}
+
+function handleRestoreFile(input) {
+  const file = input.files[0];
+  if (file) loadRestoreFile(file);
+}
+
+function loadRestoreFile(file) {
+  if (!file.name.endsWith('.json')) {
+    showAlert('Please select a .json backup file', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.version || !data.tables || data.app !== 'irs-financial-calculator') {
+        showAlert('Invalid backup file — not an IRS Calculator backup', 'error');
+        return;
+      }
+      pendingRestoreData = data;
+      // Show preview
+      const tableNames = Object.keys(data.tables);
+      const totalRows  = tableNames.reduce((s, t) => s + (data.tables[t]?.length || 0), 0);
+      document.getElementById('restore-preview').style.display = '';
+      document.getElementById('restore-preview').innerHTML = `
+        <div style="font-weight:700;margin-bottom:8px">📦 Backup Preview</div>
+        <div><strong>Created:</strong> ${data.created_at}</div>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
+          ${tableNames.map(t => `<span style="background:#ede9fe;color:#5D5CDE;border-radius:100px;padding:2px 10px;font-size:.75rem">${t}: ${data.tables[t]?.length || 0} rows</span>`).join('')}
+        </div>
+        <div style="margin-top:8px;font-size:.8rem;color:#555"><strong>Total records:</strong> ${totalRows.toLocaleString()}</div>`;
+      document.getElementById('btn-do-restore').style.display = '';
+      document.getElementById('restore-results').style.display = 'none';
+    } catch(ex) {
+      showAlert('Could not parse backup file: ' + ex.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function doRestore() {
+  if (!pendingRestoreData) return;
+  if (!confirm('This will import all records from the backup into the current database. Duplicates will be skipped. Continue?')) return;
+  const btn = document.getElementById('btn-do-restore');
+  btn.disabled = true; btn.textContent = '⏳ Restoring…';
+  try {
+    const res = await apiFetch('/api/admin/restore', {
+      method: 'POST',
+      body: JSON.stringify(pendingRestoreData)
+    });
+    const d = await res.json();
+    btn.disabled = false; btn.textContent = '⬆️ Restore Selected Backup';
+    if (!res.ok) { showAlert(d.error, 'error'); return; }
+
+    // Show results
+    document.getElementById('restore-results').style.display = '';
+    document.getElementById('restore-results-body').innerHTML = `
+      <div style="margin-bottom:12px;font-size:.88rem;color:#16a34a;font-weight:700">
+        ✅ Restore completed from backup dated ${d.backup_date}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${Object.entries(d.results).map(([table, result]) => `
+          <div style="display:flex;justify-content:space-between;padding:6px 10px;background:#f8f9fa;border-radius:6px;font-size:.83rem">
+            <span><strong>${table}</strong></span>
+            <span style="color:${result.includes('inserted') ? '#16a34a' : '#888'}">${result}</span>
+          </div>`).join('')}
+      </div>`;
+    showAlert('Restore complete!', 'success');
+    loadBackupStatus();
+    pendingRestoreData = null;
+    document.getElementById('btn-do-restore').style.display = 'none';
+    document.getElementById('restore-preview').style.display = 'none';
+    document.getElementById('restore-file-input').value = '';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '⬆️ Restore Selected Backup';
+    showAlert('Restore failed: ' + e.message, 'error');
+  }
 }
 
 // ── Init: verify auth + require admin

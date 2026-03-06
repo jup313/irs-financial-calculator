@@ -144,6 +144,31 @@ textarea{resize:vertical;min-height:60px}
 /* Spinner */
 .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* Hide number input spinners */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+/* Catalog modal */
+.catalog-modal{max-width:700px}
+.catalog-search{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:.88rem;outline:none;margin-bottom:12px}
+.catalog-search:focus{border-color:#5D5CDE}
+.cat-filter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.cat-chip{padding:4px 12px;border-radius:100px;border:1.5px solid #e0e0e0;background:#fff;font-size:.76rem;cursor:pointer;transition:all .15s;font-weight:600;color:#555}
+.cat-chip:hover,.cat-chip.active{background:#5D5CDE;color:#fff;border-color:#5D5CDE}
+.catalog-table{width:100%;border-collapse:collapse;font-size:.83rem}
+.catalog-table th{background:#f8f9fa;padding:8px 10px;text-align:left;font-size:.72rem;font-weight:700;color:#555;text-transform:uppercase;position:sticky;top:0}
+.catalog-table td{padding:8px 10px;border-bottom:1px solid #f5f5f5;cursor:pointer;transition:background .1s}
+.catalog-table tr:hover td{background:#f0f4ff}
+.catalog-table .item-name{font-weight:600;color:#1a1a2e}
+.catalog-table .item-cat{font-size:.72rem;color:#888;margin-top:1px}
+.catalog-table .item-price{font-weight:700;color:#5D5CDE;white-space:nowrap}
+.catalog-table .add-btn{padding:3px 10px;background:#5D5CDE;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:.75rem;font-weight:600}
+.catalog-table .add-btn:hover{background:#4d4cce}
+.catalog-scroll{max-height:380px;overflow-y:auto;border:1px solid #f0f0f0;border-radius:8px}
+/* Contact picker */
+.contact-picker{background:#f8f9fa;border:1.5px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.contact-picker select{width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.88rem;outline:none;background:#fff;margin-bottom:6px}
+.contact-picker select:focus{border-color:#5D5CDE}
 /* Print */
 @media print{
   .topnav,.sidebar,.page-header,.card-header button,.btn,.modal-bg{display:none!important}
@@ -178,6 +203,8 @@ textarea{resize:vertical;min-height:60px}
     <div class="sidebar-section">Email</div>
     <div class="sidebar-item" data-page="compose" onclick="switchPage('compose')">✉️ Compose Email</div>
     <div class="sidebar-item" data-page="emaillog" onclick="switchPage('emaillog')">📬 Sent Log</div>
+    <div class="sidebar-section">Contacts</div>
+    <div class="sidebar-item" data-page="contacts" onclick="switchPage('contacts')">👤 Contacts <span class="count" id="contacts-count">0</span></div>
     <div class="sidebar-section">Settings</div>
     <div class="sidebar-item" data-page="settings" onclick="switchPage('settings')">⚙️ Email & Business</div>
   </aside>
@@ -282,8 +309,22 @@ textarea{resize:vertical;min-height:60px}
 
           <!-- CLIENT INFO -->
           <div class="card">
-            <div class="card-header"><h3>👤 Bill To — Client Information</h3></div>
+            <div class="card-header">
+              <h3>👤 Bill To — Client Information</h3>
+              <button class="btn btn-secondary btn-sm" onclick="openContactPicker()">📋 Pick from Contacts</button>
+            </div>
             <div class="card-body">
+              <div class="contact-picker" id="contact-picker-row">
+                <label style="font-size:.72rem;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Quick-fill from Contact / Case</label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <select id="f-contact-pick" style="flex:1;min-width:160px" onchange="fillFromContact(this.value)">
+                    <option value="">— Select existing contact or case —</option>
+                    <optgroup label="📁 Cases" id="opt-cases"></optgroup>
+                    <optgroup label="👤 Contacts" id="opt-contacts"></optgroup>
+                  </select>
+                  <button class="btn btn-secondary btn-sm" onclick="openNewContactModal()">+ New Contact</button>
+                </div>
+              </div>
               <div class="form-grid">
                 <div class="form-group"><label>Client Name *</label><input id="f-client-name" type="text" placeholder="Jane Smith" oninput="updatePreview()"></div>
                 <div class="form-group"><label>Client Email</label><input id="f-client-email" type="email" placeholder="jane@example.com" oninput="updatePreview()"></div>
@@ -312,7 +353,10 @@ textarea{resize:vertical;min-height:60px}
           <div class="card">
             <div class="card-header">
               <h3>📝 Line Items</h3>
-              <button class="btn btn-secondary btn-sm" onclick="addLineItem()">+ Add Item</button>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-secondary btn-sm" onclick="openCatalogModal()">📦 Add from Catalog</button>
+                <button class="btn btn-secondary btn-sm" onclick="addLineItem()">+ Blank Item</button>
+              </div>
             </div>
             <div class="card-body" style="overflow-x:auto;padding:0">
               <table class="items-table">
@@ -374,13 +418,38 @@ textarea{resize:vertical;min-height:60px}
       </div>
     </div>
 
+    <!-- ══ CONTACTS PAGE ═══════════════════════════════════════════════════ -->
+    <div id="page-contacts" class="page">
+      <div class="page-header">
+        <div class="page-title">Contacts</div>
+        <button class="btn btn-primary" onclick="openNewContactModal()">+ New Contact</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>Actions</th></tr></thead>
+          <tbody id="contacts-body"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ══ COMPOSE EMAIL ════════════════════════════════════════════════════ -->
     <div id="page-compose" class="page">
       <div class="page-header"><div class="page-title">Compose Email</div></div>
       <div id="compose-alert" class="alert"></div>
       <div class="card">
         <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
-          <div class="form-group"><label>To *</label><input id="c-to" type="email" placeholder="client@example.com"></div>
+          <div class="form-group">
+            <label>To * <span style="font-size:.68rem;color:#888;font-weight:400;text-transform:none">(separate multiple with commas)</span></label>
+            <input id="c-to" type="text" placeholder="client@example.com, another@email.com">
+          </div>
+          <div class="form-group">
+            <label>CC <span style="font-size:.68rem;color:#888;font-weight:400;text-transform:none">(optional)</span></label>
+            <input id="c-cc" type="text" placeholder="cc@example.com, another@email.com">
+          </div>
+          <div class="form-group">
+            <label>BCC <span style="font-size:.68rem;color:#888;font-weight:400;text-transform:none">(optional)</span></label>
+            <input id="c-bcc" type="text" placeholder="bcc@example.com">
+          </div>
           <div class="form-group"><label>Subject *</label><input id="c-subject" type="text" placeholder="Subject line"></div>
           <div class="form-group">
             <label>Message</label>
@@ -511,15 +580,39 @@ textarea{resize:vertical;min-height:60px}
 
 <!-- SEND INVOICE MODAL -->
 <div class="modal-bg" id="send-modal">
-  <div class="modal">
+  <div class="modal" style="max-width:520px">
     <h3>📧 Send Invoice by Email</h3>
     <div id="send-alert" class="alert"></div>
-    <div class="form-group" style="margin-bottom:10px"><label>Recipient Email *</label><input id="sm-to" type="email"></div>
-    <div class="form-group" style="margin-bottom:10px"><label>Subject</label><input id="sm-subject" type="text"></div>
-    <div class="form-group" style="margin-bottom:10px"><label>Personal Message (optional)</label><textarea id="sm-message" rows="3" placeholder="Hi Jane, please find your invoice attached…"></textarea></div>
+
+    <div class="form-group" style="margin-bottom:10px">
+      <label>To — Primary Recipient *</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="sm-to" type="email" placeholder="client@example.com" style="flex:1">
+        <button type="button" onclick="addSendRecipient()" class="btn btn-secondary btn-sm">+ Add CC</button>
+      </div>
+      <div style="font-size:.72rem;color:#888;margin-top:3px">Separate multiple addresses with commas, or click "+ Add CC" for extra fields</div>
+    </div>
+
+    <!-- Dynamic CC rows injected here -->
+    <div id="sm-cc-rows"></div>
+
+    <div class="form-group" style="margin-bottom:10px">
+      <label>BCC (hidden copy)</label>
+      <input id="sm-bcc" type="text" placeholder="bcc@example.com, another@example.com">
+    </div>
+
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Subject</label>
+      <input id="sm-subject" type="text">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Personal Message (optional)</label>
+      <textarea id="sm-message" rows="3" placeholder="Hi Jane, please find your invoice attached…"></textarea>
+    </div>
     <input type="hidden" id="sm-inv-id">
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeSendModal()">Cancel</button>
+      <button class="btn btn-secondary" onclick="duplicateInvoice()" id="btn-duplicate-inv">📋 New Invoice from This</button>
       <button class="btn btn-primary" id="btn-do-send" onclick="doSendInvoice()">📧 Send Invoice</button>
     </div>
   </div>
@@ -532,10 +625,51 @@ textarea{resize:vertical;min-height:60px}
       <h3 id="view-inv-num" style="font-size:.95rem;font-weight:700">Invoice</h3>
       <div style="display:flex;gap:8px">
         <button class="btn btn-secondary btn-sm" onclick="printViewModal()">🖨️ Print</button>
+        <button class="btn btn-secondary btn-sm" id="btn-view-send" onclick="openSendFromView()">📧 Send</button>
+        <button class="btn btn-secondary btn-sm" id="btn-view-dup" onclick="duplicateInvoiceFromView()">📋 New Invoice from This</button>
         <button class="btn btn-secondary btn-sm" onclick="closeViewModal()">✕ Close</button>
       </div>
     </div>
     <div id="view-inv-content" style="padding:22px;font-family:Arial,sans-serif;font-size:.85rem"></div>
+  </div>
+</div>
+
+<!-- CATALOG MODAL -->
+<div class="modal-bg" id="catalog-modal">
+  <div class="modal catalog-modal">
+    <h3>📦 Service Catalog</h3>
+    <input type="text" class="catalog-search" id="catalog-search" placeholder="Search items…" oninput="filterCatalog(this.value)">
+    <div class="cat-filter" id="cat-filter"></div>
+    <div class="catalog-scroll">
+      <table class="catalog-table">
+        <thead><tr><th>Item</th><th>Category</th><th>Price</th><th>Tax</th><th></th></tr></thead>
+        <tbody id="catalog-body"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeCatalogModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW / EDIT CONTACT MODAL -->
+<div class="modal-bg" id="contact-modal">
+  <div class="modal">
+    <h3 id="contact-modal-title">New Contact</h3>
+    <div id="contact-modal-alert" class="alert"></div>
+    <div class="form-grid" style="margin-bottom:10px">
+      <div class="form-group"><label>Full Name *</label><input id="cm-name" type="text" placeholder="Jane Smith"></div>
+      <div class="form-group"><label>Company</label><input id="cm-company" type="text" placeholder="Acme LLC"></div>
+      <div class="form-group"><label>Email</label><input id="cm-email" type="email" placeholder="jane@example.com"></div>
+      <div class="form-group"><label>Phone</label><input id="cm-phone" type="tel" placeholder="555-0100"></div>
+      <div class="form-group span2"><label>Address</label><textarea id="cm-address" rows="2" placeholder="123 Main St, City, State ZIP"></textarea></div>
+      <div class="form-group span2"><label>Notes</label><textarea id="cm-notes" rows="2" placeholder="Additional notes…"></textarea></div>
+    </div>
+    <input type="hidden" id="cm-id">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeContactModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveContact()">Save Contact</button>
+    </div>
   </div>
 </div>
 
@@ -580,6 +714,7 @@ function switchPage(id) {
   if (id === 'new')       { if (!editingInvId) resetInvoiceForm(); updatePreview(); }
   if (id === 'emaillog')  loadEmailLog();
   if (id === 'settings')  loadSettings();
+  if (id === 'contacts')  loadContacts();
 }
 
 function switchSettingsTab(id) {
@@ -900,8 +1035,9 @@ async function resetInvoiceForm() {
   lineItems = [{ description:'', quantity:1, unit_price:0, taxable:true }];
   clearLogo();
   initColorSwatches();
-  // Auto-fill from settings
+  // Auto-fill from settings + refresh contact/case picker
   fillFromSettings();
+  refreshContactPicker();
   renderLineItems();
   recalcTotals();
   // Load cases dropdown
@@ -1009,6 +1145,7 @@ async function deleteInvoice(id, num) {
 
 // ── View invoice modal
 async function viewInvoice(id) {
+  _viewModalInvId = id;  // track for duplicate/send buttons in view modal
   const res = await apiFetch(`/api/invoices/${id}`);
   if (!res.ok) return;
   const inv = await res.json();
@@ -1104,6 +1241,7 @@ async function loadDashboard() {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
+        <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice based on this one">📋</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:#aaa">No invoices yet</td></tr>';
 }
@@ -1128,6 +1266,7 @@ function renderInvoiceList(invoices) {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
+        <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
         <button class="btn btn-sm btn-danger" onclick="deleteInvoice(${inv.id},'${inv.invoice_number}')" style="margin-left:4px">Del</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#aaa">No invoices found</td></tr>';
@@ -1148,40 +1287,79 @@ async function openSendModal(id) {
   const inv = await res.json();
   document.getElementById('sm-inv-id').value   = id;
   document.getElementById('sm-to').value       = inv.client_email || '';
+  document.getElementById('sm-bcc').value      = '';
   document.getElementById('sm-subject').value  = `Invoice ${inv.invoice_number}`;
   document.getElementById('sm-message').value  = '';
+  document.getElementById('sm-cc-rows').innerHTML = ''; // clear previous CC rows
   document.getElementById('send-alert').className = 'alert';
+  // Store invoice ref for duplicate button
+  document.getElementById('btn-duplicate-inv').dataset.invId = id;
   document.getElementById('send-modal').classList.add('open');
 }
 function closeSendModal() { document.getElementById('send-modal').classList.remove('open'); }
+// Collect all CC addresses from dynamic rows
+function getSendCCAddresses() {
+  const rows = document.querySelectorAll('#sm-cc-rows .sm-cc-input');
+  return Array.from(rows).map(i => i.value.trim()).filter(Boolean).join(', ');
+}
+
+// Add a CC recipient row
+function addSendRecipient() {
+  const wrap = document.getElementById('sm-cc-rows');
+  const div  = document.createElement('div');
+  div.className = 'form-group';
+  div.style.cssText = 'margin-bottom:8px;display:flex;gap:6px;align-items:center';
+  div.innerHTML = `<input type="text" class="sm-cc-input" placeholder="cc@example.com" style="flex:1;padding:8px 11px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.88rem;outline:none">
+    <button type="button" onclick="this.closest('div').remove()" style="background:#fee2e2;border:1px solid #fecaca;color:#dc2626;border-radius:6px;padding:5px 9px;cursor:pointer;font-size:.8rem">✕</button>`;
+  wrap.appendChild(div);
+}
+
 async function doSendInvoice() {
   const id  = document.getElementById('sm-inv-id').value;
+  const to  = document.getElementById('sm-to').value.trim();
+  const cc  = getSendCCAddresses();
+  const bcc = document.getElementById('sm-bcc').value.trim();
+  if (!to) { showAlert('Primary recipient email is required','error','send-alert'); return; }
   const btn = document.getElementById('btn-do-send');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending…';
   const res = await apiFetch(`/api/invoices/${id}/send`, {
     method:'POST',
-    body: JSON.stringify({ to:document.getElementById('sm-to').value, subject:document.getElementById('sm-subject').value, message:document.getElementById('sm-message').value })
+    body: JSON.stringify({
+      to,
+      cc:  cc  || undefined,
+      bcc: bcc || undefined,
+      subject: document.getElementById('sm-subject').value,
+      message: document.getElementById('sm-message').value
+    })
   });
   const d = await res.json();
   btn.disabled=false; btn.textContent='📧 Send Invoice';
   if (!res.ok) { showAlert(d.error,'error','send-alert'); return; }
-  showAlert('Invoice sent!','success','send-alert');
-  setTimeout(() => closeSendModal(), 1400);
+  const ccNote = cc ? ` + CC: ${cc}` : '';
+  showAlert(`Invoice sent to ${to}${ccNote}`, 'success', 'send-alert');
+  setTimeout(() => closeSendModal(), 1600);
   loadInvoiceList();
 }
 
-// ── Compose email
+// ── Compose email (supports multiple To, CC, BCC)
 async function sendEmail() {
-  const to=document.getElementById('c-to').value.trim(), subject=document.getElementById('c-subject').value.trim();
-  const body=document.getElementById('c-body').innerHTML;
-  if (!to||!subject) { showAlert('To and Subject required','error','compose-alert'); return; }
-  const btn=document.getElementById('btn-send-email');
+  const to      = document.getElementById('c-to').value.trim();
+  const cc      = document.getElementById('c-cc')?.value.trim()  || '';
+  const bcc     = document.getElementById('c-bcc')?.value.trim() || '';
+  const subject = document.getElementById('c-subject').value.trim();
+  const body    = document.getElementById('c-body').innerHTML;
+  if (!to || !subject) { showAlert('To and Subject are required','error','compose-alert'); return; }
+  const btn = document.getElementById('btn-send-email');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending…';
-  const res = await apiFetch('/api/email/send',{method:'POST',body:JSON.stringify({to,subject,body_html:body})});
+  const payload = { to, subject, body_html: body };
+  if (cc)  payload.cc  = cc;
+  if (bcc) payload.bcc = bcc;
+  const res = await apiFetch('/api/email/send', { method:'POST', body: JSON.stringify(payload) });
   const d = await res.json();
   btn.disabled=false; btn.textContent='Send Email';
   if (!res.ok) { showAlert(d.error,'error','compose-alert'); return; }
-  showAlert('Email sent!','success','compose-alert');
+  const recipients = [to, cc, bcc].filter(Boolean).join(', ');
+  showAlert(`Email sent to: ${recipients}`, 'success', 'compose-alert');
   clearCompose();
 }
 
@@ -1268,6 +1446,300 @@ async function testSmtp() {
   el.textContent = res.ok ? '✓ '+d.message : '✗ '+d.error;
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// SERVICE CATALOG
+// ═══════════════════════════════════════════════════════════════
+// Catalog prices are intentionally blank in this public release.
+// Populate with your own service prices before deploying.
+const CATALOG = [
+  { name: 'IRS Evaluation and Tax Analysis', price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'IRS Account Analysis',            price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'IRS Payment Plan 433',            price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'IRS Services',                    price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'Tax Resolution with RO',          price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'OIC',                             price: 0, taxable: false, category: 'Tax Resolution 2' },
+  { name: 'CNC',                             price: 0, taxable: false, category: 'Tax Resolution 2' },
+  { name: 'Individual TAX',                  price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Schedule C for SE',               price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Business Tax',                    price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Tax Consultation',                price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Simple',              price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Mid',                 price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Complex',             price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Small Services Fee',              price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Additional Services',             price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Additional Services (Minor)',     price: 0, taxable: false, category: 'Tax Services' },
+];
+
+let catalogFilter = 'All';
+const CATALOG_CATS = ['All', ...new Set(CATALOG.map(i => i.category))];
+
+function openCatalogModal() {
+  catalogFilter = 'All';
+  document.getElementById('catalog-search').value = '';
+  renderCatalogFilters();
+  renderCatalogItems(CATALOG);
+  document.getElementById('catalog-modal').classList.add('open');
+}
+function closeCatalogModal() { document.getElementById('catalog-modal').classList.remove('open'); }
+
+function renderCatalogFilters() {
+  document.getElementById('cat-filter').innerHTML = CATALOG_CATS.map(cat => `
+    <div class="cat-chip ${cat === catalogFilter ? 'active' : ''}"
+      onclick="setCatalogFilter('${cat}')">${cat}</div>`).join('');
+}
+
+function setCatalogFilter(cat) {
+  catalogFilter = cat;
+  renderCatalogFilters();
+  filterCatalog(document.getElementById('catalog-search').value);
+}
+
+function filterCatalog(q) {
+  const term = q.toLowerCase();
+  const filtered = CATALOG.filter(item =>
+    (catalogFilter === 'All' || item.category === catalogFilter) &&
+    (!term || item.name.toLowerCase().includes(term) || item.category.toLowerCase().includes(term))
+  );
+  renderCatalogItems(filtered);
+}
+
+function renderCatalogItems(items) {
+  document.getElementById('catalog-body').innerHTML = items.length
+    ? items.map((item, i) => `
+        <tr>
+          <td>
+            <div class="item-name">${item.name}</div>
+            <div class="item-cat">${item.category}</div>
+          </td>
+          <td>${item.category}</td>
+          <td class="item-price">${fmtMoney(item.price)}</td>
+          <td style="font-size:.75rem;color:${item.taxable ? '#16a34a' : '#888'}">${item.taxable ? 'Taxable' : 'Exempt'}</td>
+          <td><button class="add-btn" onclick="addCatalogItem(${CATALOG.indexOf(item)})">+ Add</button></td>
+        </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;padding:20px;color:#aaa">No items match</td></tr>';
+}
+
+function addCatalogItem(idx) {
+  const item = CATALOG[idx];
+  lineItems.push({ description: item.name, quantity: 1, unit_price: item.price, taxable: item.taxable });
+  renderLineItems();
+  recalcTotals();
+  // Visual flash on the add button
+  const btn = document.querySelector(`#catalog-body tr:nth-child(${document.querySelectorAll('#catalog-body tr').length}) .add-btn`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════════════════════════════
+let allContacts = [];
+let editingContactId = null;
+
+async function loadContacts() {
+  const res = await apiFetch('/api/contacts');
+  if (!res.ok) return;
+  allContacts = await res.json();
+  document.getElementById('contacts-count').textContent = allContacts.length;
+  renderContactsTable(allContacts);
+  refreshContactPicker();
+}
+
+function renderContactsTable(contacts) {
+  document.getElementById('contacts-body').innerHTML = contacts.length
+    ? contacts.map(c => `
+        <tr>
+          <td><strong>${c.full_name}</strong></td>
+          <td>${c.company || '—'}</td>
+          <td>${c.email || '—'}</td>
+          <td>${c.phone || '—'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-secondary" onclick="openEditContactModal(${c.id})">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteContact(${c.id},'${c.full_name.replace(/'/g,"\'")}')">Delete</button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;padding:24px;color:#aaa">No contacts yet — add one to get started</td></tr>';
+}
+
+async function refreshContactPicker() {
+  // Load both cases and contacts into the quick-fill dropdown
+  const [casesRes, contactsRes] = await Promise.all([
+    apiFetch('/api/cases'),
+    apiFetch('/api/contacts')
+  ]);
+  const cases    = casesRes.ok    ? await casesRes.json()    : [];
+  const contacts = contactsRes.ok ? await contactsRes.json() : [];
+  allContacts = contacts;
+  document.getElementById('contacts-count').textContent = contacts.length;
+
+  const optCases    = document.getElementById('opt-cases');
+  const optContacts = document.getElementById('opt-contacts');
+  if (optCases)    optCases.innerHTML    = cases.map(c => `<option value="case:${c.id}" data-name="${c.client_name}" data-email="${c.client_email||''}" data-phone="${c.client_phone||''}" data-address="${c.client_address||''}" data-caseid="${c.id}">${c.client_name}${c.tax_year ? ' ('+c.tax_year+')' : ''}</option>`).join('');
+  if (optContacts)  optContacts.innerHTML = contacts.map(ct => `<option value="contact:${ct.id}" data-name="${ct.full_name}" data-email="${ct.email||''}" data-phone="${ct.phone||''}" data-address="${ct.address||''}">${ct.full_name}${ct.company ? ' — '+ct.company : ''}</option>`).join('');
+
+  // Also populate the case dropdown on the form
+  const caseSelect = document.getElementById('f-case-id');
+  if (caseSelect) {
+    caseSelect.innerHTML = '<option value="">No linked case</option>' +
+      cases.map(c => `<option value="${c.id}">${c.client_name}${c.tax_year ? ' ('+c.tax_year+')' : ''}</option>`).join('');
+  }
+}
+
+function fillFromContact(val) {
+  if (!val) return;
+  const sel    = document.getElementById('f-contact-pick');
+  const opt    = sel.options[sel.selectedIndex];
+  const name   = opt.dataset.name    || '';
+  const email  = opt.dataset.email   || '';
+  const phone  = opt.dataset.phone   || '';
+  const addr   = opt.dataset.address || '';
+  const caseId = opt.dataset.caseid  || '';
+
+  document.getElementById('f-client-name').value    = name;
+  document.getElementById('f-client-email').value   = email;
+  document.getElementById('f-client-phone').value   = phone;
+  document.getElementById('f-client-address').value = addr;
+  if (caseId) document.getElementById('f-case-id').value = caseId;
+  updatePreview();
+}
+
+function openNewContactModal() {
+  editingContactId = null;
+  document.getElementById('contact-modal-title').textContent = 'New Contact';
+  ['cm-name','cm-company','cm-email','cm-phone','cm-address','cm-notes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('cm-id').value = '';
+  document.getElementById('contact-modal-alert').className = 'alert';
+  document.getElementById('contact-modal').classList.add('open');
+}
+
+function openEditContactModal(id) {
+  const c = allContacts.find(x => x.id === id);
+  if (!c) return;
+  editingContactId = id;
+  document.getElementById('contact-modal-title').textContent = 'Edit Contact';
+  document.getElementById('cm-name').value    = c.full_name || '';
+  document.getElementById('cm-company').value = c.company   || '';
+  document.getElementById('cm-email').value   = c.email     || '';
+  document.getElementById('cm-phone').value   = c.phone     || '';
+  document.getElementById('cm-address').value = c.address   || '';
+  document.getElementById('cm-notes').value   = c.notes     || '';
+  document.getElementById('cm-id').value      = id;
+  document.getElementById('contact-modal-alert').className = 'alert';
+  document.getElementById('contact-modal').classList.add('open');
+}
+
+function closeContactModal() { document.getElementById('contact-modal').classList.remove('open'); }
+
+function openContactPicker() {
+  switchPage('contacts');
+}
+
+async function saveContact() {
+  const payload = {
+    full_name: document.getElementById('cm-name').value.trim(),
+    company:   document.getElementById('cm-company').value.trim(),
+    email:     document.getElementById('cm-email').value.trim(),
+    phone:     document.getElementById('cm-phone').value.trim(),
+    address:   document.getElementById('cm-address').value.trim(),
+    notes:     document.getElementById('cm-notes').value.trim(),
+  };
+  if (!payload.full_name) {
+    showAlert('Full name is required', 'error', 'contact-modal-alert');
+    return;
+  }
+  const method = editingContactId ? 'PUT' : 'POST';
+  const url    = editingContactId ? `/api/contacts/${editingContactId}` : '/api/contacts';
+  const res = await apiFetch(url, { method, body: JSON.stringify(payload) });
+  const d = await res.json();
+  if (!res.ok) { showAlert(d.error, 'error', 'contact-modal-alert'); return; }
+  showAlert(editingContactId ? 'Contact updated' : 'Contact saved', 'success', 'contact-modal-alert');
+  setTimeout(() => { closeContactModal(); loadContacts(); }, 800);
+}
+
+async function deleteContact(id, name) {
+  if (!confirm(`Delete contact "${name}"?`)) return;
+  const res = await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
+  if (res.ok) { showAlert('Contact deleted', 'success'); loadContacts(); }
+  else { const d = await res.json(); showAlert(d.error, 'error'); }
+}
+
+// ── Duplicate invoice — pre-fills new invoice form with same data (new number, draft status)
+let _viewModalInvId = null;
+
+async function duplicateInvoice(id) {
+  // id comes from list/dashboard buttons; also called from send modal via data attribute
+  const targetId = id || parseInt(document.getElementById('btn-duplicate-inv')?.dataset?.invId || '0');
+  if (!targetId) return;
+  const res = await apiFetch(`/api/invoices/${targetId}`);
+  if (!res.ok) return;
+  const inv = await res.json();
+  closeSendModal();
+  closeViewModal();
+
+  // Prepare the new invoice form with cloned data
+  await resetInvoiceForm();
+
+  document.getElementById('f-client-name').value    = inv.client_name    || '';
+  document.getElementById('f-client-email').value   = inv.client_email   || '';
+  document.getElementById('f-client-phone').value   = inv.client_phone   || '';
+  document.getElementById('f-client-address').value = inv.client_address || '';
+  document.getElementById('f-case-id').value         = inv.case_id        || '';
+  document.getElementById('f-issue-date').value      = new Date().toISOString().slice(0,10); // today
+  document.getElementById('f-due-date').value        = '';
+  document.getElementById('f-tax-rate').value        = inv.tax_rate   || 0;
+  document.getElementById('f-discount').value        = inv.discount   || 0;
+  document.getElementById('f-amount-paid').value     = 0; // reset payment
+  document.getElementById('f-notes').value           = inv.notes  || '';
+  document.getElementById('f-terms').value           = inv.terms  || '';
+  document.getElementById('f-footer').value          = inv.footer || '';
+
+  // Restore branding
+  let cf = {};
+  try { cf = typeof inv.custom_fields==='string' ? JSON.parse(inv.custom_fields) : (inv.custom_fields||{}); } catch(e){}
+  document.getElementById('f-biz-name').value    = cf.biz_name    || '';
+  document.getElementById('f-biz-phone').value   = cf.biz_phone   || '';
+  document.getElementById('f-biz-address').value = cf.biz_address || '';
+  document.getElementById('f-biz-website').value = cf.biz_website || '';
+  document.getElementById('f-biz-email').value   = cf.biz_email   || '';
+  const logoSrc = cf.biz_logo || '';
+  currentLogoDataUrl = logoSrc || null;
+  if (logoSrc) {
+    const thumb = document.getElementById('logo-thumb');
+    thumb.src = logoSrc; thumb.style.display='block';
+    document.getElementById('logo-drop-text').style.display='none';
+  }
+  const color = cf.inv_color || '#5D5CDE';
+  document.getElementById('f-inv-color').value = color;
+  document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color===color));
+
+  // Clone line items
+  lineItems = (inv.items||[]).map(it => ({
+    description: it.description,
+    quantity:    it.quantity,
+    unit_price:  it.unit_price,
+    taxable:     it.taxable !== 0
+  }));
+  if (!lineItems.length) lineItems = [{ description:'', quantity:1, unit_price:0, taxable:true }];
+  renderLineItems();
+  recalcTotals();
+
+  document.getElementById('inv-form-title').textContent = `New Invoice (from ${inv.invoice_number})`;
+  editingInvId = null;
+  switchPage('new');
+  showAlert(`New invoice pre-filled from ${inv.invoice_number} — review and save`, 'success', 'inv-alert');
+}
+
+function duplicateInvoiceFromView() {
+  duplicateInvoice(_viewModalInvId);
+}
+
+function openSendFromView() {
+  closeViewModal();
+  openSendModal(_viewModalInvId);
+}
+
 function signOut() {
   apiFetch('/api/logout',{method:'POST'}).catch(()=>{});
   sessionStorage.clear();
@@ -1288,6 +1760,7 @@ function signOut() {
     await loadSettings();
     initColorSwatches();
     loadDashboard();
+    loadContacts();
   } catch { window.location.href='/login.html'; }
 })();
 </script>
