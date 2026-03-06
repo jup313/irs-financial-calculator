@@ -1843,6 +1843,98 @@ app.get('/api/admin/backup/db', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── Restore raw .db file — multipart upload, replaces database file
+// Uses express raw body parsing on this one route only
+app.post('/api/admin/restore/db', requireAuth, requireAdmin, (req, res) => {
+  const fs     = require('fs');
+  const path   = require('path');
+  const dbPath = process.env.DB_PATH || '/data/users.db';
+  const tmpPath = dbPath + '.restore.tmp';
+
+  // Safety: only accept application/octet-stream or multipart
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('application/octet-stream') && !contentType.includes('multipart/form-data')) {
+    return res.status(400).json({ error: 'Send the .db file as application/octet-stream body' });
+  }
+
+  const writeStream = fs.createWriteStream(tmpPath);
+  let size = 0;
+  const MAX_SIZE = 500 * 1024 * 1024; // 500 MB max
+
+  req.on('data', chunk => {
+    size += chunk.length;
+    if (size > MAX_SIZE) {
+      writeStream.destroy();
+      fs.unlink(tmpPath, () => {});
+      return res.status(413).json({ error: 'File too large (max 500 MB)' });
+    }
+    writeStream.write(chunk);
+  });
+
+  req.on('end', async () => {
+    writeStream.end();
+    writeStream.on('finish', async () => {
+      try {
+        // Validate it is actually a SQLite file (magic bytes: 53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00)
+        const header = Buffer.alloc(16);
+        const fd = fs.openSync(tmpPath, 'r');
+        fs.readSync(fd, header, 0, 16, 0);
+        fs.closeSync(fd);
+        const magic = 'SQLite format 3\x00';
+        if (header.toString('ascii') !== magic) {
+          fs.unlink(tmpPath, () => {});
+          return res.status(400).json({ error: 'File is not a valid SQLite database' });
+        }
+
+        // ── Backup current DB before overwriting
+        const backupPath = dbPath + '.pre-restore-' + Date.now() + '.bak';
+        try { fs.copyFileSync(dbPath, backupPath); } catch(e) { /* best-effort */ }
+
+        // ── Safe DB file restore strategy:
+        // 1. WAL checkpoint to flush any pending writes
+        // 2. Copy uploaded file over existing DB while DB is still open (SQLite handles this safely)
+        // 3. Send SIGTERM to self — Docker restart policy will bring it back immediately
+        //    with the new DB file. This is the cleanest way to hot-swap SQLite in Node.js.
+
+        // Step 1: Flush WAL
+        await new Promise(resolve => db.run('PRAGMA wal_checkpoint(TRUNCATE)', resolve));
+
+        // Step 2: Copy the new DB file over the current one
+        fs.copyFileSync(tmpPath, dbPath);
+        fs.chmodSync(dbPath, 0o666);
+        fs.unlink(tmpPath, () => {});
+
+        log.info({ by: req.user.username, size: size }, 'DB restore from file complete — restarting process');
+
+        // Step 3: Send response BEFORE restarting
+        res.json({
+          success: true,
+          message: 'Database file replaced. Server is restarting to load the restored database (takes ~10 seconds).',
+          fileSize: size,
+          preRestoreBackup: path.basename(backupPath),
+          restarting: true
+        });
+
+        // Step 4: Graceful restart — Docker restart policy brings us back with new DB
+        setTimeout(() => {
+          log.info('Initiating process restart for DB file restore');
+          process.exit(0);
+        }, 500);
+      } catch (err) {
+        fs.unlink(tmpPath, () => {});
+        log.error({ err: err.message }, 'DB file restore failed');
+        res.status(500).json({ error: 'DB restore failed: ' + err.message });
+      }
+    });
+  });
+
+  req.on('error', err => {
+    writeStream.destroy();
+    fs.unlink(tmpPath, () => {});
+    res.status(500).json({ error: 'Upload error: ' + err.message });
+  });
+});
+
 // ── Restore from JSON backup
 app.post('/api/admin/restore', requireAuth, requireAdmin, async (req, res) => {
   try {

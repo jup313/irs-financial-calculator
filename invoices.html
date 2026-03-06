@@ -144,6 +144,23 @@ textarea{resize:vertical;min-height:60px}
 /* Spinner */
 .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* Paid invoice row highlight */
+tr.row-paid td { background:#f0fdf4!important; }
+tr.row-paid td strong { color:#15803d; }
+tr.row-overdue td { background:#fef2f2!important; }
+/* Mark paid button */
+.btn-mark-paid{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;padding:4px 10px;border-radius:6px;font-size:.76rem;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-mark-paid:hover{background:#15803d;color:#fff}
+/* Dashboard paid/unpaid summary */
+.inv-summary-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.inv-summary-chip{flex:1;min-width:120px;background:#fff;border-radius:10px;padding:12px 16px;box-shadow:0 2px 6px rgba(0,0,0,.05);border-left:4px solid #e0e0e0}
+.inv-summary-chip.paid{border-left-color:#16a34a}
+.inv-summary-chip.unpaid{border-left-color:#d97706}
+.inv-summary-chip.overdue{border-left-color:#dc2626}
+.inv-summary-chip.draft{border-left-color:#9ca3af}
+.inv-summary-chip .chip-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700}
+.inv-summary-chip .chip-value{font-size:1.4rem;font-weight:800;margin-top:2px}
+.inv-summary-chip .chip-count{font-size:.72rem;color:#aaa;margin-top:1px}
 /* Hide number input spinners */
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
@@ -218,11 +235,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <div class="page-title">Invoice Dashboard</div>
         <button class="btn btn-primary" onclick="switchPage('new')">+ New Invoice</button>
       </div>
-      <div class="stat-strip">
-        <div class="stat-mini blue"><div class="label">Total Invoiced</div><div class="value" id="ds-total">$0</div></div>
-        <div class="stat-mini green"><div class="label">Paid</div><div class="value" id="ds-paid">$0</div></div>
-        <div class="stat-mini orange"><div class="label">Outstanding</div><div class="value" id="ds-outstanding">$0</div></div>
-        <div class="stat-mini red"><div class="label">Overdue</div><div class="value" id="ds-overdue">$0</div></div>
+      <!-- Summary chips -->
+      <div class="inv-summary-bar">
+        <div class="inv-summary-chip"><div class="chip-label">Total Invoiced</div><div class="chip-value" id="ds-total">$0</div><div class="chip-count" id="ds-total-count"></div></div>
+        <div class="inv-summary-chip paid"><div class="chip-label">✅ Paid</div><div class="chip-value" id="ds-paid">$0</div><div class="chip-count" id="ds-paid-count"></div></div>
+        <div class="inv-summary-chip unpaid"><div class="chip-label">⏳ Outstanding</div><div class="chip-value" id="ds-outstanding">$0</div><div class="chip-count" id="ds-outstanding-count"></div></div>
+        <div class="inv-summary-chip overdue"><div class="chip-label">🔴 Overdue</div><div class="chip-value" id="ds-overdue">$0</div><div class="chip-count" id="ds-overdue-count"></div></div>
+        <div class="inv-summary-chip draft"><div class="chip-label">📝 Draft</div><div class="chip-value" id="ds-draft">$0</div><div class="chip-count" id="ds-draft-count"></div></div>
       </div>
       <div class="card">
         <div class="card-header"><h3>Recent Invoices</h3></div>
@@ -669,6 +688,51 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeContactModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveContact()">Save Contact</button>
+    </div>
+  </div>
+</div>
+
+<!-- MARK PAID MODAL -->
+<div class="modal-bg" id="mark-paid-modal">
+  <div class="modal" style="max-width:420px">
+    <h3>✅ Mark Invoice as Paid</h3>
+    <div id="mark-paid-alert" class="alert"></div>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px;font-size:.85rem">
+      <div id="mp-inv-label" style="font-weight:700;color:#15803d;margin-bottom:4px"></div>
+      <div id="mp-inv-total" style="color:#555"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Amount Received ($)</label>
+      <input id="mp-amount" type="text" placeholder="Full amount or partial payment">
+      <div style="font-size:.72rem;color:#888;margin-top:3px">Leave blank to mark as fully paid</div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Payment Date</label>
+      <input id="mp-date" type="date">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Payment Method (optional)</label>
+      <select id="mp-method" style="width:100%;padding:8px 11px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.88rem;outline:none">
+        <option value="">— Select —</option>
+        <option>Check</option>
+        <option>Cash</option>
+        <option>Credit Card</option>
+        <option>ACH / Bank Transfer</option>
+        <option>Zelle</option>
+        <option>Venmo</option>
+        <option>PayPal</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:4px">
+      <label>Notes (optional)</label>
+      <input id="mp-notes" type="text" placeholder="Check #1234, etc.">
+    </div>
+    <input type="hidden" id="mp-inv-id">
+    <input type="hidden" id="mp-inv-total-val">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeMarkPaidModal()">Cancel</button>
+      <button class="btn btn-primary" id="btn-do-mark-paid" onclick="doMarkPaid()" style="background:linear-gradient(135deg,#16a34a,#15803d)">✅ Confirm Payment</button>
     </div>
   </div>
 </div>
@@ -1222,14 +1286,26 @@ async function loadDashboard() {
   if (!res.ok) return;
   allInvoices = await res.json();
   document.getElementById('inv-count').textContent = allInvoices.length;
-  const total       = allInvoices.reduce((s,i)=>s+(i.total||0),0);
-  const paid        = allInvoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.total||0),0);
-  const outstanding = allInvoices.filter(i=>['sent','overdue'].includes(i.status)).reduce((s,i)=>s+(i.balance_due||0),0);
-  const overdue     = allInvoices.filter(i=>i.status==='overdue').reduce((s,i)=>s+(i.balance_due||0),0);
-  document.getElementById('ds-total').textContent       = fmtMoney(total);
-  document.getElementById('ds-paid').textContent        = fmtMoney(paid);
-  document.getElementById('ds-outstanding').textContent = fmtMoney(outstanding);
-  document.getElementById('ds-overdue').textContent     = fmtMoney(overdue);
+  const total        = allInvoices.reduce((s,i)=>s+(i.total||0),0);
+  const paidInvs     = allInvoices.filter(i=>i.status==='paid');
+  const unpaidInvs   = allInvoices.filter(i=>['sent','overdue'].includes(i.status));
+  const overdueInvs  = allInvoices.filter(i=>i.status==='overdue');
+  const draftInvs    = allInvoices.filter(i=>i.status==='draft');
+  const paid         = paidInvs.reduce((s,i)=>s+(i.total||0),0);
+  const outstanding  = unpaidInvs.reduce((s,i)=>s+(i.balance_due||0),0);
+  const overdue      = overdueInvs.reduce((s,i)=>s+(i.balance_due||0),0);
+  const draftAmt     = draftInvs.reduce((s,i)=>s+(i.total||0),0);
+
+  document.getElementById('ds-total').textContent         = fmtMoney(total);
+  document.getElementById('ds-total-count').textContent   = allInvoices.length + ' invoice' + (allInvoices.length!==1?'s':'');
+  document.getElementById('ds-paid').textContent          = fmtMoney(paid);
+  document.getElementById('ds-paid-count').textContent    = paidInvs.length + ' invoice' + (paidInvs.length!==1?'s':'');
+  document.getElementById('ds-outstanding').textContent   = fmtMoney(outstanding);
+  document.getElementById('ds-outstanding-count').textContent = unpaidInvs.length + ' invoice' + (unpaidInvs.length!==1?'s':'');
+  document.getElementById('ds-overdue').textContent       = fmtMoney(overdue);
+  document.getElementById('ds-overdue-count').textContent = overdueInvs.length + ' invoice' + (overdueInvs.length!==1?'s':'');
+  document.getElementById('ds-draft').textContent         = fmtMoney(draftAmt);
+  document.getElementById('ds-draft-count').textContent   = draftInvs.length + ' invoice' + (draftInvs.length!==1?'s':'');
   document.getElementById('dash-invoices').innerHTML = allInvoices.slice(0,10).map(inv=>`
     <tr>
       <td><strong>${inv.invoice_number}</strong></td>
@@ -1241,7 +1317,10 @@ async function loadDashboard() {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
-        <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice based on this one">📋</button>
+        ${inv.status !== 'paid' && inv.status !== 'cancelled'
+          ? `<button class="btn-mark-paid" onclick="openMarkPaidModal(${inv.id}, ${inv.total}, '${inv.invoice_number}')" style="margin-left:4px">✅ Mark Paid</button>`
+          : ''}
+        <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:#aaa">No invoices yet</td></tr>';
 }
@@ -1255,7 +1334,7 @@ async function loadInvoiceList() {
 }
 function renderInvoiceList(invoices) {
   document.getElementById('inv-list-body').innerHTML = invoices.map(inv=>`
-    <tr>
+    <tr class="${inv.status==='paid'?'row-paid':inv.status==='overdue'?'row-overdue':''}">
       <td><strong>${inv.invoice_number}</strong></td>
       <td>${inv.client_name}<br><span style="font-size:.75rem;color:#aaa">${inv.client_email||''}</span></td>
       <td>${inv.issue_date||'—'}</td><td>${inv.due_date||'—'}</td>
@@ -1266,6 +1345,9 @@ function renderInvoiceList(invoices) {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
+        ${inv.status !== 'paid' && inv.status !== 'cancelled'
+          ? `<button class="btn-mark-paid" onclick="openMarkPaidModal(${inv.id}, ${inv.total}, '${inv.invoice_number}')" style="margin-left:4px">✅ Mark Paid</button>`
+          : ''}
         <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
         <button class="btn btn-sm btn-danger" onclick="deleteInvoice(${inv.id},'${inv.invoice_number}')" style="margin-left:4px">Del</button>
       </td>
@@ -1450,26 +1532,24 @@ async function testSmtp() {
 // ═══════════════════════════════════════════════════════════════
 // SERVICE CATALOG
 // ═══════════════════════════════════════════════════════════════
-// Catalog prices are intentionally blank in this public release.
-// Populate with your own service prices before deploying.
 const CATALOG = [
   { name: 'IRS Evaluation and Tax Analysis', price: 0, taxable: false, category: 'Tax Resolution 1' },
-  { name: 'IRS Account Analysis',            price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'IRS Account Analysis',            price: 0,  taxable: false, category: 'Tax Resolution 1' },
   { name: 'IRS Payment Plan 433',            price: 0, taxable: false, category: 'Tax Resolution 1' },
-  { name: 'IRS Services',                    price: 0, taxable: false, category: 'Tax Resolution 1' },
-  { name: 'Tax Resolution with RO',          price: 0, taxable: false, category: 'Tax Resolution 1' },
+  { name: 'IRS Services',                    price: 0,  taxable: false, category: 'Tax Resolution 1' },
+  { name: 'Tax Resolution with RO',          price: 0,  taxable: false, category: 'Tax Resolution 1' },
   { name: 'OIC',                             price: 0, taxable: false, category: 'Tax Resolution 2' },
   { name: 'CNC',                             price: 0, taxable: false, category: 'Tax Resolution 2' },
-  { name: 'Individual TAX',                  price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Schedule C for SE',               price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Business Tax',                    price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Tax Consultation',                price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Bookkeeping Simple',              price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Bookkeeping Mid',                 price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Bookkeeping Complex',             price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Small Services Fee',              price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Additional Services',             price: 0, taxable: false, category: 'Tax Services' },
-  { name: 'Additional Services (Minor)',     price: 0, taxable: false, category: 'Tax Services' },
+  { name: 'Individual TAX',                  price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Schedule C for SE',               price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Business Tax',                    price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Tax Consultation',                price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Simple',              price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Mid',                 price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Bookkeeping Complex',             price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Small Services Fee',              price: 0,  taxable: false, category: 'Tax Services' },
+  { name: 'Additional Services',             price: 0,   taxable: false, category: 'Tax Services' },
+  { name: 'Additional Services (Minor)',     price: 0,   taxable: false, category: 'Tax Services' },
 ];
 
 let catalogFilter = 'All';
@@ -1738,6 +1818,85 @@ function duplicateInvoiceFromView() {
 function openSendFromView() {
   closeViewModal();
   openSendModal(_viewModalInvId);
+}
+
+// ── Mark Invoice as Paid
+function openMarkPaidModal(id, total, invNumber) {
+  document.getElementById('mp-inv-id').value         = id;
+  document.getElementById('mp-inv-total-val').value  = total;
+  document.getElementById('mp-inv-label').textContent = 'Invoice ' + invNumber;
+  document.getElementById('mp-inv-total').textContent = 'Invoice total: ' + fmtMoney(total);
+  document.getElementById('mp-amount').value          = total; // default to full amount
+  document.getElementById('mp-date').value            = new Date().toISOString().slice(0,10);
+  document.getElementById('mp-method').value          = '';
+  document.getElementById('mp-notes').value           = '';
+  document.getElementById('mark-paid-alert').className = 'alert';
+  document.getElementById('mark-paid-modal').classList.add('open');
+}
+
+function closeMarkPaidModal() {
+  document.getElementById('mark-paid-modal').classList.remove('open');
+}
+
+async function doMarkPaid() {
+  const id          = document.getElementById('mp-inv-id').value;
+  const totalVal    = parseFloat(document.getElementById('mp-inv-total-val').value) || 0;
+  const amountInput = document.getElementById('mp-amount').value.trim();
+  const amount      = amountInput ? parseFloat(amountInput) : totalVal;
+  const date        = document.getElementById('mp-date').value;
+  const method      = document.getElementById('mp-method').value;
+  const notes       = document.getElementById('mp-notes').value.trim();
+
+  if (isNaN(amount) || amount <= 0) {
+    showAlert('Please enter a valid payment amount', 'error', 'mark-paid-alert');
+    return;
+  }
+
+  const btn = document.getElementById('btn-do-mark-paid');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
+  // Determine new status: paid if amount >= total, otherwise keep as sent with partial payment
+  const newStatus = amount >= totalVal ? 'paid' : 'sent';
+
+  // Build notes string to append to invoice notes
+  const paymentNote = [
+    'Payment received: ' + fmtMoney(amount),
+    date ? 'Date: ' + date : '',
+    method ? 'Method: ' + method : '',
+    notes || ''
+  ].filter(Boolean).join(' | ');
+
+  // Fetch current invoice data to preserve all fields
+  const getRes = await apiFetch(`/api/invoices/${id}`);
+  if (!getRes.ok) { showAlert('Could not load invoice', 'error', 'mark-paid-alert'); btn.disabled=false; btn.textContent='✅ Confirm Payment'; return; }
+  const inv = await getRes.json();
+
+  const updatedNotes = inv.notes ? inv.notes + '
+' + paymentNote : paymentNote;
+  const updatedPaid  = (parseFloat(inv.amount_paid) || 0) + amount;
+
+  const res = await apiFetch(`/api/invoices/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      client_name:    inv.client_name,
+      status:         newStatus,
+      amount_paid:    updatedPaid,
+      notes:          updatedNotes,
+      items:          inv.items || [],
+      tax_rate:       inv.tax_rate,
+      discount:       inv.discount,
+    })
+  });
+
+  btn.disabled = false; btn.textContent = '✅ Confirm Payment';
+  const d = await res.json();
+  if (!res.ok) { showAlert(d.error, 'error', 'mark-paid-alert'); return; }
+
+  const msg = newStatus === 'paid'
+    ? `Invoice marked as PAID — ${fmtMoney(amount)} received`
+    : `Partial payment of ${fmtMoney(amount)} recorded — balance due: ${fmtMoney(totalVal - updatedPaid)}`;
+  showAlert(msg, 'success', 'mark-paid-alert');
+  setTimeout(() => { closeMarkPaidModal(); loadDashboard(); loadInvoiceList(); }, 1500);
 }
 
 function signOut() {

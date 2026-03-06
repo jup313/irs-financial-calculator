@@ -361,24 +361,49 @@ tr:hover td{background:#fafbff}
         </div>
       </div>
 
-      <div class="table-card">
-        <div class="table-header"><h3>⬆️ Restore from Backup</h3></div>
-        <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
-          <div style="padding:12px;background:#fef9c3;border:1px solid #fde047;border-radius:8px;font-size:.82rem;color:#713f12">
-            ⚠️ <strong>Restore adds data — it does not delete existing records.</strong> Duplicates are skipped. User accounts are not restored via JSON (use DB file restore for full recovery). Always back up before restoring.
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <!-- JSON Restore -->
+        <div class="table-card">
+          <div class="table-header"><h3>📄 Restore from JSON Backup</h3></div>
+          <div style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+            <div style="padding:10px 12px;background:#fef9c3;border:1px solid #fde047;border-radius:8px;font-size:.8rem;color:#713f12">
+              ⚠️ <strong>Adds data only — does not delete existing records.</strong> Duplicates are skipped. User accounts are not restored.
+            </div>
+            <div style="border:2px dashed #d0d0d0;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#fafafa" id="restore-drop"
+              ondragover="event.preventDefault();this.style.borderColor='#5D5CDE';this.style.background='#f5f4ff'"
+              ondragleave="this.style.borderColor='#d0d0d0';this.style.background='#fafafa'"
+              ondrop="handleRestoreDrop(event)">
+              <input type="file" id="restore-file-input" accept=".json" onchange="handleRestoreFile(this)"
+                style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
+              <div style="font-size:1.8rem;margin-bottom:4px">📂</div>
+              <div style="font-weight:600;color:#555;font-size:.85rem">Drop .json backup file here</div>
+              <div style="font-size:.72rem;color:#aaa;margin-top:2px">or click to browse</div>
+            </div>
+            <div id="restore-preview" style="display:none;padding:10px;background:#f8f9fa;border-radius:8px;font-size:.82rem"></div>
+            <button class="btn btn-primary" id="btn-do-restore" onclick="doRestore()" style="display:none">⬆️ Restore JSON Backup</button>
           </div>
-          <div style="border:2px dashed #d0d0d0;border-radius:8px;padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#fafafa" id="restore-drop"
-            ondragover="event.preventDefault();this.style.borderColor='#5D5CDE';this.style.background='#f5f4ff'"
-            ondragleave="this.style.borderColor='#d0d0d0';this.style.background='#fafafa'"
-            ondrop="handleRestoreDrop(event)">
-            <input type="file" id="restore-file-input" accept=".json" onchange="handleRestoreFile(this)"
-              style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
-            <div style="font-size:2rem;margin-bottom:6px">📂</div>
-            <div style="font-weight:600;color:#555;font-size:.88rem">Drop JSON backup file here</div>
-            <div style="font-size:.75rem;color:#aaa;margin-top:3px">or click to browse</div>
+        </div>
+
+        <!-- RAW DB Restore -->
+        <div class="table-card">
+          <div class="table-header"><h3>🗄️ Restore Raw Database File</h3></div>
+          <div style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+            <div style="padding:10px 12px;background:#fee2e2;border:1px solid #fecaca;border-radius:8px;font-size:.8rem;color:#991b1b">
+              🚨 <strong>FULL REPLACEMENT — this will overwrite the entire database.</strong> All current data will be replaced with the contents of the uploaded file. A pre-restore backup is saved automatically. Only use a <code>.db</code> file from this app's backup.
+            </div>
+            <div style="border:2px dashed #fca5a5;border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:#fff5f5" id="db-restore-drop"
+              ondragover="event.preventDefault();this.style.borderColor='#dc2626';this.style.background='#fee2e2'"
+              ondragleave="this.style.borderColor='#fca5a5';this.style.background='#fff5f5'"
+              ondrop="handleDbRestoreDrop(event)">
+              <input type="file" id="db-restore-file-input" accept=".db" onchange="handleDbRestoreFile(this)"
+                style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
+              <div style="font-size:1.8rem;margin-bottom:4px">🗄️</div>
+              <div style="font-weight:600;color:#dc2626;font-size:.85rem">Drop .db database file here</div>
+              <div style="font-size:.72rem;color:#aaa;margin-top:2px">or click to browse — must be a valid SQLite .db file</div>
+            </div>
+            <div id="db-restore-preview" style="display:none;padding:10px;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;font-size:.82rem"></div>
+            <button class="btn btn-danger" id="btn-do-db-restore" onclick="doDbRestore()" style="display:none">🗄️ Replace Database with This File</button>
           </div>
-          <div id="restore-preview" style="display:none;padding:12px;background:#f8f9fa;border-radius:8px;font-size:.83rem"></div>
-          <button class="btn btn-primary" id="btn-do-restore" onclick="doRestore()" style="display:none">⬆️ Restore Selected Backup</button>
         </div>
       </div>
     </div>
@@ -395,7 +420,7 @@ tr:hover td{background:#fafbff}
       <div style="padding:16px 20px;font-size:.84rem;color:#555;line-height:1.7">
         <p><strong>JSON Backup</strong> — Recommended for routine backups. Includes all client cases, contacts, invoices, notes, email history and settings. Does not include user passwords (by design). Restore by uploading the JSON file in the Restore panel.</p>
         <br>
-        <p><strong>Raw .db File</strong> — Full SQLite database including user accounts and password hashes. Use for disaster recovery or full server migration. To restore a .db file: stop the container, replace <code>/data/users.db</code> on the QNAP volume, and restart.</p>
+         <p><strong>Raw .db File</strong> — Full SQLite database including user accounts and password hashes. Use for disaster recovery or full server migration. You can now restore it directly from the Restore panel above — the server automatically validates the file, saves a pre-restore backup, and hot-swaps the database without restarting.</p>
         <br>
         <p><strong>Scheduled Backups</strong> — Set a recurring calendar reminder to download a JSON backup weekly or monthly. Store backups in a secure, separate location.</p>
         <br>
@@ -961,7 +986,8 @@ async function deleteDbRow(table, rowid) {
 // ════════════════════════════════════════════════════════
 // BACKUP & RESTORE
 // ════════════════════════════════════════════════════════
-let pendingRestoreData = null;
+let pendingRestoreData  = null;
+let pendingDbRestoreFile = null;
 
 async function loadBackupStatus() {
   const res = await apiFetch('/api/admin/backup/status');
@@ -1111,6 +1137,126 @@ async function doRestore() {
     document.getElementById('restore-file-input').value = '';
   } catch (e) {
     btn.disabled = false; btn.textContent = '⬆️ Restore Selected Backup';
+    showAlert('Restore failed: ' + e.message, 'error');
+  }
+}
+
+// ── Raw DB Restore handlers
+function handleDbRestoreDrop(event) {
+  event.preventDefault();
+  const drop = document.getElementById('db-restore-drop');
+  drop.style.borderColor = '#fca5a5'; drop.style.background = '#fff5f5';
+  const file = event.dataTransfer.files[0];
+  if (file) loadDbRestoreFile(file);
+}
+
+function handleDbRestoreFile(input) {
+  const file = input.files[0];
+  if (file) loadDbRestoreFile(file);
+}
+
+function loadDbRestoreFile(file) {
+  if (!file.name.endsWith('.db')) {
+    showAlert('Please select a .db SQLite file', 'error');
+    return;
+  }
+  pendingDbRestoreFile = file;
+  const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+  const sizeKB = (file.size / 1024).toFixed(1);
+  const sizeDisplay = file.size > 1048576 ? sizeMB + ' MB' : sizeKB + ' KB';
+
+  document.getElementById('db-restore-preview').style.display = '';
+  document.getElementById('db-restore-preview').innerHTML = `
+    <div style="font-weight:700;color:#dc2626;margin-bottom:6px">⚠️ Ready to restore — this will REPLACE all current data</div>
+    <div><strong>File:</strong> ${file.name}</div>
+    <div><strong>Size:</strong> ${sizeDisplay}</div>
+    <div><strong>Last modified:</strong> ${new Date(file.lastModified).toLocaleString()}</div>
+    <div style="margin-top:6px;color:#555;font-size:.8rem">A backup of the current database will be saved automatically before replacing.</div>`;
+  document.getElementById('btn-do-db-restore').style.display = '';
+}
+
+async function doDbRestore() {
+  if (!pendingDbRestoreFile) return;
+  if (!confirm(
+    '🚨 CONFIRM DATABASE REPLACEMENT\n\n' +
+    'This will replace ALL current data with the contents of:\n' +
+    pendingDbRestoreFile.name + '\n\n' +
+    'A backup of your current database will be saved first.\n\n' +
+    'Are you absolutely sure?'
+  )) return;
+
+  const btn = document.getElementById('btn-do-db-restore');
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Uploading & restoring…';
+
+  try {
+    const res = await fetch(API + '/api/admin/restore/db', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': `Bearer ${token()}`
+      },
+      body: pendingDbRestoreFile
+    });
+
+    const d = await res.json();
+    btn.disabled = false;
+    btn.textContent = '🗄️ Replace Database with This File';
+
+    if (!res.ok) {
+      showAlert('DB restore failed: ' + d.error, 'error');
+      return;
+    }
+
+    // Show success
+    document.getElementById('restore-results').style.display = '';
+    document.getElementById('restore-results-body').innerHTML = `
+      <div style="color:#16a34a;font-weight:700;font-size:.9rem;margin-bottom:10px">
+        ✅ Database restored successfully from ${pendingDbRestoreFile.name}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:.83rem">
+        <div style="padding:6px 10px;background:#f8f9fa;border-radius:6px">
+          <strong>File size:</strong> ${(d.fileSize/1024).toFixed(1)} KB
+        </div>
+        <div style="padding:6px 10px;background:#f8f9fa;border-radius:6px">
+          <strong>Pre-restore backup saved as:</strong> ${d.preRestoreBackup}
+        </div>
+        <div style="padding:8px 10px;background:#fef9c3;border:1px solid #fde047;border-radius:6px;margin-top:4px">
+          ⚡ <strong>The server is now using the restored database.</strong> Refresh the page to see the restored data.
+        </div>
+      </div>`;
+
+    pendingDbRestoreFile = null;
+    document.getElementById('btn-do-db-restore').style.display = 'none';
+    document.getElementById('db-restore-preview').style.display = 'none';
+    document.getElementById('db-restore-file-input').value = '';
+
+    // Server is restarting — poll healthz until it comes back, then reload
+    if (d.restarting) {
+      showAlert('Database replaced — server is restarting, page will reload automatically…', 'success');
+      const pollStart = Date.now();
+      const pollHealth = setInterval(async () => {
+        if (Date.now() - pollStart > 60000) {
+          clearInterval(pollHealth);
+          showAlert('Server restart is taking longer than expected. Please refresh manually.', 'error');
+          return;
+        }
+        try {
+          const hRes = await fetch('/healthz');
+          if (hRes.ok) {
+            clearInterval(pollHealth);
+            showAlert('Server restarted successfully! Reloading page…', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } catch(e) { /* still restarting */ }
+      }, 2000);
+    } else {
+      showAlert('Database restored! Refresh the page to see your restored data.', 'success');
+      setTimeout(() => { loadBackupStatus(); loadAnalytics(); }, 2000);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🗄️ Replace Database with This File';
     showAlert('Restore failed: ' + e.message, 'error');
   }
 }
