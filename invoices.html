@@ -1317,9 +1317,7 @@ async function loadDashboard() {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
-        ${inv.status !== 'paid' && inv.status !== 'cancelled'
-          ? `<button class="btn-mark-paid" onclick="openMarkPaidModal(${inv.id}, ${inv.total}, '${inv.invoice_number}')" style="margin-left:4px">✅ Mark Paid</button>`
-          : ''}
+        ${inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
         <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:#aaa">No invoices yet</td></tr>';
@@ -1345,9 +1343,7 @@ function renderInvoiceList(invoices) {
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
         <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
-        ${inv.status !== 'paid' && inv.status !== 'cancelled'
-          ? `<button class="btn-mark-paid" onclick="openMarkPaidModal(${inv.id}, ${inv.total}, '${inv.invoice_number}')" style="margin-left:4px">✅ Mark Paid</button>`
-          : ''}
+        ${inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
         <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
         <button class="btn btn-sm btn-danger" onclick="deleteInvoice(${inv.id},'${inv.invoice_number}')" style="margin-left:4px">Del</button>
       </td>
@@ -1822,6 +1818,8 @@ function openSendFromView() {
 
 // ── Mark Invoice as Paid
 function openMarkPaidModal(id, total, invNumber) {
+  // invNumber can come from data attribute or direct call
+  if (typeof invNumber !== 'string') invNumber = String(invNumber || id);
   document.getElementById('mp-inv-id').value         = id;
   document.getElementById('mp-inv-total-val').value  = total;
   document.getElementById('mp-inv-label').textContent = 'Invoice ' + invNumber;
@@ -1871,8 +1869,7 @@ async function doMarkPaid() {
   if (!getRes.ok) { showAlert('Could not load invoice', 'error', 'mark-paid-alert'); btn.disabled=false; btn.textContent='✅ Confirm Payment'; return; }
   const inv = await getRes.json();
 
-  const updatedNotes = inv.notes ? inv.notes + '
-' + paymentNote : paymentNote;
+  const updatedNotes = inv.notes ? inv.notes + '\n' + paymentNote : paymentNote;
   const updatedPaid  = (parseFloat(inv.amount_paid) || 0) + amount;
 
   const res = await apiFetch(`/api/invoices/${id}`, {
@@ -1908,23 +1905,31 @@ function signOut() {
 // ── Init
 (async () => {
   const t = token();
-  if (!t) { window.location.href='/login.html'; return; }
+  if (!t) {
+    // Remember this page so login can redirect back here
+    sessionStorage.setItem('irs_intended_page', '/invoices.html');
+    window.location.href='/login.html';
+    return;
+  }
   try {
     const res = await apiFetch('/api/profile');
-    if (!res.ok) { sessionStorage.clear(); window.location.href='/login.html'; return; }
+    if (!res.ok) {
+      sessionStorage.clear();
+      sessionStorage.setItem('irs_intended_page', '/invoices.html');
+      window.location.href='/login.html';
+      return;
+    }
     const user = await res.json();
     document.getElementById('nav-user').textContent = user.username;
     if (user.role==='admin') document.getElementById('btn-admin-link').style.display='';
     initColorSwatches();
-    // Load dashboard and contacts immediately — do NOT await settings first
-    // Settings may be slow if a large logo is stored (base64); load it in background
+    // Load dashboard and contacts immediately — settings loads in background
     loadDashboard();
     loadContacts();
-    // Load settings in background so the form works when the user navigates to it
     loadSettings().catch(e => console.warn('Settings load failed:', e.message));
   } catch(e) {
     console.error('Init error:', e.message);
-    // Only redirect to login if it is genuinely a 401, not a slow settings response
+    sessionStorage.setItem('irs_intended_page', '/invoices.html');
     window.location.href='/login.html';
   }
 })();

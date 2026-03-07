@@ -182,9 +182,11 @@ function storeSession(data) {
 }
 
 function redirect(role) {
-  // Everyone lands on the calculator app first.
-  // Admins can navigate to /admin.html from the top nav inside the app.
-  window.location.href = '/app.html';
+  // If the user was trying to reach a specific page before being sent to login,
+  // send them back there. Otherwise default to app.html.
+  const intended = sessionStorage.getItem('irs_intended_page');
+  sessionStorage.removeItem('irs_intended_page');
+  window.location.href = intended || '/app.html';
 }
 
 // If already logged in, redirect immediately
