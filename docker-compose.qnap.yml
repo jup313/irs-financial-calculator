@@ -36,7 +36,7 @@ services:
             -newkey rsa:2048
             -keyout /certs/server.key
             -out    /certs/server.crt
-            -subj '/C=US/ST=Local/L=Local/O=JP Professional Services LLC/CN=REPLACE_WITH_QNAP_IP'
+            -subj '/C=US/ST=Local/L=Local/O=Your Business Name/CN=REPLACE_WITH_QNAP_IP'
             -addext 'subjectAltName=IP:REPLACE_WITH_QNAP_IP,IP:127.0.0.1,DNS:localhost' &&
           chmod 644 /certs/server.crt &&
           chmod 600 /certs/server.key &&

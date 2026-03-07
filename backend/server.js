@@ -285,8 +285,7 @@ async function initDb() {
   // Seed first admin if no users exist
   const count = await dbGet('SELECT COUNT(*) AS n FROM users');
   if (count.n === 0) {
-    const defaultPass = process.env.DEFAULT_ADMIN_PASSWORD || 'ChangeMe@First!';
-    const hash = await bcrypt.hash(defaultPass, BCRYPT_ROUNDS);
+    const hash = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'ChangeMe@First!', BCRYPT_ROUNDS);
     await dbRun(
       `INSERT INTO users (username, full_name, password_hash, role) VALUES (?,?,?,?)`,
       ['admin', 'System Administrator', hash, 'admin']
