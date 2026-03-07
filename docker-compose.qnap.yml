@@ -6,65 +6,93 @@
 #   3. Fill in the REQUIRED values marked with  ← CHANGE THIS
 #   4. Click Deploy
 #
-# App URL after deploy:  http://<your-qnap-ip>:8880
+# App URL:  https://<your-qnap-ip>:8881   (HTTPS — secure)
+#           http://<your-qnap-ip>:8880    (HTTP  — redirects to HTTPS)
+#
 # First login: admin / <your DEFAULT_ADMIN_PASSWORD>
+#
+# BROWSER WARNING: You will see a "Not Secure" / certificate warning the first
+# time because this uses a self-signed certificate. Click "Advanced" → "Proceed"
+# to continue. This is normal for self-signed certs on local networks.
 # ──────────────────────────────────────────────────────────────────────────────
 
 version: "3.8"
 
 services:
 
+  # ── Certificate generator — run ONCE before starting the app ──────────────
+  # In Container Station: create this compose first, let certgen finish,
+  # then it will stop automatically. The frontend will use the generated certs.
+  certgen:
+    image: alpine
+    container_name: irs-certgen
+    volumes:
+      - irs-certs:/certs
+    command: >
+      sh -c "
+        apk add --no-cache openssl &&
+        if [ ! -f /certs/server.crt ]; then
+          openssl req -x509 -nodes -days 1825
+            -newkey rsa:2048
+            -keyout /certs/server.key
+            -out    /certs/server.crt
+            -subj '/C=US/ST=Local/L=Local/O=JP Professional Services LLC/CN=REPLACE_WITH_QNAP_IP'
+            -addext 'subjectAltName=IP:REPLACE_WITH_QNAP_IP,IP:127.0.0.1,DNS:localhost' &&
+          chmod 644 /certs/server.crt &&
+          chmod 600 /certs/server.key &&
+          echo Certificate generated successfully &&
+          openssl x509 -noout -subject -enddate -in /certs/server.crt
+        else
+          echo Certificate already exists - skipping generation
+          openssl x509 -noout -subject -enddate -in /certs/server.crt
+        fi
+      "
+
+  # ── Backend API (Node.js + SQLite) ─────────────────────────────────────────
   irs-backend:
-    image: ghcr.io/YOUR_GITHUB_USERNAME/irs-calculator-backend:latest
+    image: jup313/irs-financial-calculator:latest
     container_name: irs-backend
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: "8080"
-
-      # ── REQUIRED: Strong random secret (min 32 chars) ──────────────────────
-      # Generate one at: https://generate-secret.vercel.app/64
-      JWT_SECRET: "REPLACE_WITH_64_CHAR_RANDOM_SECRET"   # ← CHANGE THIS
-
+      JWT_SECRET: "REPLACE_WITH_64_CHAR_RANDOM_SECRET"
       JWT_EXPIRY: "8h"
       BCRYPT_ROUNDS: "12"
       DB_PATH: "/data/users.db"
-
-      # ── REQUIRED: Set to your QNAP IP ──────────────────────────────────────
-      # Found in: QNAP → Control Panel → Network & Virtual Switch
-      CORS_ORIGINS: "http://YOUR_QNAP_IP:8880"           # ← CHANGE THIS
-
-      # ── First admin account password (created on first startup) ────────────
-      DEFAULT_ADMIN_PASSWORD: "ChangeMe@First!"           # ← CHANGE THIS
-
-      # ── Facebook integration (optional — leave blank to disable) ───────────
+      # ── REQUIRED: Set to your QNAP IP ──
+      CORS_ORIGINS: "https://REPLACE_WITH_QNAP_IP:8881,http://REPLACE_WITH_QNAP_IP:8880,https://localhost:8881"
+      DEFAULT_ADMIN_PASSWORD: "ChangeMe@First!"   # ← CHANGE THIS
       FACEBOOK_APP_ID: ""
       FACEBOOK_APP_SECRET: ""
       FACEBOOK_GROUP_ID: ""
-
     volumes:
       - irs-db:/data
-
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
-
     expose:
       - "8080"
 
+  # ── Frontend (nginx HTTPS) ─────────────────────────────────────────────────
   irs-frontend:
-    image: ghcr.io/YOUR_GITHUB_USERNAME/irs-calculator-frontend:latest
+    image: jup313/irs-frontend:latest
     container_name: irs-frontend
     restart: unless-stopped
     ports:
-      - "8880:80"   # Change 8880 if port is already used on your QNAP
+      - "8880:80"    # HTTP  — redirects to HTTPS
+      - "8881:443"   # HTTPS — main secure entry point
+    volumes:
+      - irs-certs:/etc/nginx/certs:ro
     depends_on:
       irs-backend:
         condition: service_healthy
 
 volumes:
   irs-db:
+    driver: local
+  irs-certs:
     driver: local
