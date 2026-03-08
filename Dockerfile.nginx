@@ -3,16 +3,18 @@ FROM nginx:alpine
 # Remove default nginx content
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy frontend pages
+# Copy frontend pages and shared scripts
 COPY login.html    /usr/share/nginx/html/login.html
 COPY app.html      /usr/share/nginx/html/app.html
 COPY admin.html    /usr/share/nginx/html/admin.html
 COPY invoices.html /usr/share/nginx/html/invoices.html
+COPY chat.js          /usr/share/nginx/html/chat.js
+COPY socket.io.min.js /usr/share/nginx/html/socket.io.min.js
 
 # Copy HTTP-only nginx config (no SSL)
 COPY nginx.conf /etc/nginx/nginx.conf
 
-RUN chmod 644 /usr/share/nginx/html/*.html
+RUN chmod 644 /usr/share/nginx/html/*.html /usr/share/nginx/html/*.js
 
 EXPOSE 80
 

@@ -2,6 +2,8 @@
 
 // ─── DEPENDENCIES ─────────────────────────────────────────────────────────────
 const express      = require('express');
+const http         = require('http');
+const { Server: SocketIO } = require('socket.io');
 const sqlite3      = require('sqlite3').verbose();
 const bcrypt       = require('bcrypt');
 const speakeasy    = require('speakeasy');
@@ -171,6 +173,16 @@ async function initDb() {
   )`);
 
   await dbRun(`CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_id)`);
+
+  // ── Chat messages — real-time team messaging
+  await dbRun(`CREATE TABLE IF NOT EXISTS chat_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    username    TEXT    NOT NULL,
+    message     TEXT    NOT NULL,
+    created_at  INTEGER DEFAULT (strftime('%s','now'))
+  )`);
+  await dbRun(`CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_messages(created_at DESC)`);
 
   // ── Email settings — one row per user (SMTP outbound + optional IMAP)
   await dbRun(`CREATE TABLE IF NOT EXISTS email_settings (
@@ -2025,6 +2037,25 @@ app.get('/api/admin/backup/status', requireAuth, requireAdmin, async (req, res) 
   }
 });
 
+// ─── CHAT REST API ────────────────────────────────────────────────────────────
+// GET /api/chat/messages — fetch last 100 messages
+app.get('/api/chat/messages', requireAuth, async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT id, user_id, username, message, created_at
+       FROM chat_messages ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json(rows.reverse());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// GET /api/chat/online — who is currently online
+app.get('/api/chat/online', requireAuth, (_req, res) => {
+  res.json([...onlineUsers.values()]);
+});
+
 // ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 // eslint-disable-next-line no-unused-vars
@@ -2032,6 +2063,88 @@ app.use((err, _req, res, _next) => {
   log.error({ err: err.message }, 'unhandled error');
   res.status(500).json({ error: IS_PROD ? 'Internal server error' : err.message });
 });
+
+// ─── SOCKET.IO — real-time chat & presence ────────────────────────────────────
+// Map of socketId → { userId, username }
+const onlineUsers = new Map();
+
+function setupSocketIO(httpServer) {
+  const io = new SocketIO(httpServer, {
+    cors: {
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        const privateNet = /^http:\/\/(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(origin);
+        if (privateNet || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        return cb(new Error('CORS not allowed'));
+      },
+      credentials: true,
+    },
+    path: '/socket.io',
+  });
+
+  // Authenticate socket connection via JWT
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (!token) return next(new Error('No token'));
+    try {
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
+      socket.userId   = payload.userId;
+      socket.username = payload.username;
+      next();
+    } catch {
+      next(new Error('Invalid token'));
+    }
+  });
+
+  io.on('connection', (socket) => {
+    log.info({ username: socket.username }, 'chat: user connected');
+
+    // Register user as online
+    onlineUsers.set(socket.id, { userId: socket.userId, username: socket.username });
+    io.emit('users:online', [...onlineUsers.values()]);
+
+    // Send last 100 messages on connect
+    dbAll(`SELECT id, user_id, username, message, created_at
+           FROM chat_messages ORDER BY created_at DESC LIMIT 100`)
+      .then(rows => socket.emit('chat:history', rows.reverse()))
+      .catch(() => {});
+
+    // Handle incoming message
+    socket.on('chat:send', async (data) => {
+      const message = typeof data?.message === 'string' ? data.message.trim().slice(0, 1000) : '';
+      if (!message) return;
+      try {
+        const result = await dbRun(
+          `INSERT INTO chat_messages (user_id, username, message) VALUES (?,?,?)`,
+          [socket.userId, socket.username, message]
+        );
+        const newMsg = {
+          id: result.lastID,
+          user_id: socket.userId,
+          username: socket.username,
+          message,
+          created_at: Math.floor(Date.now() / 1000),
+        };
+        io.emit('chat:message', newMsg);
+      } catch (err) {
+        log.error({ err: err.message }, 'chat: failed to save message');
+      }
+    });
+
+    // Typing indicator
+    socket.on('chat:typing', (isTyping) => {
+      socket.broadcast.emit('chat:typing', { username: socket.username, isTyping: !!isTyping });
+    });
+
+    socket.on('disconnect', () => {
+      log.info({ username: socket.username }, 'chat: user disconnected');
+      onlineUsers.delete(socket.id);
+      io.emit('users:online', [...onlineUsers.values()]);
+    });
+  });
+
+  return io;
+}
 
 // ─── STARTUP ──────────────────────────────────────────────────────────────────
 async function start() {
@@ -2042,11 +2155,21 @@ async function start() {
     if (r.changes) log.info({ removed: r.changes }, 'expired sessions cleaned');
   }, 6 * 60 * 60 * 1000);
 
-  const server = app.listen(PORT, () => log.info({ port: PORT, env: NODE_ENV }, 'Server started'));
+  // Clean up old chat messages (keep last 30 days)
+  setInterval(async () => {
+    const cutoff = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    const r = await dbRun(`DELETE FROM chat_messages WHERE created_at < ?`, [cutoff]).catch(()=>({}));
+    if (r.changes) log.info({ removed: r.changes }, 'old chat messages cleaned');
+  }, 24 * 60 * 60 * 1000);
+
+  const httpServer = http.createServer(app);
+  setupSocketIO(httpServer);
+
+  httpServer.listen(PORT, () => log.info({ port: PORT, env: NODE_ENV }, 'Server started'));
 
   const shutdown = (sig) => {
     log.info({ sig }, 'shutting down');
-    server.close(() => db.close(() => { log.info('clean shutdown'); process.exit(0); }));
+    httpServer.close(() => db.close(() => { log.info('clean shutdown'); process.exit(0); }));
     setTimeout(() => process.exit(1), 10_000);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

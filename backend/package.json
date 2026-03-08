@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.16",
     "pino": "^9.5.0",
+    "socket.io": "^4.8.3",
     "speakeasy": "^2.0.0",
     "sqlite3": "^5.1.6"
   },
