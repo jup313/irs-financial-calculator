@@ -1,18 +1,17 @@
 FROM nginx:alpine
 
-# Remove default nginx website
+# Remove default nginx content
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy all frontend pages
+# Copy frontend pages
 COPY login.html    /usr/share/nginx/html/login.html
-COPY index.html    /usr/share/nginx/html/app.html
+COPY app.html      /usr/share/nginx/html/app.html
 COPY admin.html    /usr/share/nginx/html/admin.html
 COPY invoices.html /usr/share/nginx/html/invoices.html
 
-# Copy custom nginx configuration
+# Copy HTTP-only nginx config (no SSL)
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Set proper permissions
 RUN chmod 644 /usr/share/nginx/html/*.html
 
 EXPOSE 80

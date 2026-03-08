@@ -1,80 +1,58 @@
-# Docker Compose reads variables from the .env file in this directory automatically.
-# Copy .env.example → .env and fill in values before deploying.
+# IRS Financial Calculator — Local Docker Compose (HTTP only)
+#
+# Usage:
+#   cp .env.example .env    # fill in JWT_SECRET and DEFAULT_ADMIN_PASSWORD
+#   docker compose up -d --build
+#
+# Access: http://localhost:8880
 
 services:
 
-  # ── Node.js API backend ────────────────────────────────────────────────────
-  backend:
+  # ── Backend API (Node.js + SQLite) ──────────────────────────────────────────
+  irs-backend:
     container_name: irs-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
     image: jup313/irs-financial-calculator:latest
-    ports:
-      - "8081:8080"          # host 8080 is taken by pihole; backend API on host:8081
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: "8080"
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JWT_EXPIRY: ${JWT_EXPIRY:-8h}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      DB_PATH: /data/users.db
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-ChangeMe@First!}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8880}
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
       FACEBOOK_GROUP_ID: ${FACEBOOK_GROUP_ID:-}
-      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://YOUR_SERVER_IP,https://localhost,http://localhost:8081}
-      DB_PATH: /data/users.db
     volumes:
       - db-data:/data
-    restart: unless-stopped
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
-  # ── Nginx — HTTPS + HTTP redirect ─────────────────────────────────────────
-  nginx:
-    container_name: irs-nginx
-    image: nginx:alpine
-    ports:
-      - "80:80"       # HTTP — redirects to HTTPS
-      - "443:443"     # HTTPS — main entry point
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./login.html:/usr/share/nginx/html/login.html:ro
-      - ./index.html:/usr/share/nginx/html/app.html:ro
-      - ./admin.html:/usr/share/nginx/html/admin.html:ro
-      - ./invoices.html:/usr/share/nginx/html/invoices.html:ro
-      # SSL certificate volume — generate with: docker compose run --rm certgen
-      - ssl-certs:/etc/nginx/certs:ro
-    depends_on:
-      backend:
-        condition: service_healthy
+  # ── Frontend (nginx HTTP only) ───────────────────────────────────────────────
+  irs-frontend:
+    container_name: irs-frontend
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: jup313/irs-frontend:latest
     restart: unless-stopped
-
-  # ── One-shot cert generator — run once to create/renew self-signed cert ───
-  # Usage: docker compose run --rm certgen
-  certgen:
-    image: alpine
-    profiles: ["certgen"]   # only runs when explicitly called
-    volumes:
-      - ssl-certs:/certs
-    command: >
-      sh -c "
-        apk add --no-cache openssl &&
-        openssl req -x509 -nodes -days 1825
-          -newkey rsa:2048
-          -keyout /certs/server.key
-          -out    /certs/server.crt
-          -subj '/C=US/ST=Local/L=Local/O=IRS Calculator/CN=localhost'
-          -addext 'subjectAltName=IP:127.0.0.1,DNS:localhost' &&
-        chmod 644 /certs/server.crt &&
-        chmod 600 /certs/server.key &&
-        echo Certificate generated: &&
-        openssl x509 -noout -subject -enddate -in /certs/server.crt
-      "
+    ports:
+      - "${HTTP_PORT:-8880}:80"
+    depends_on:
+      irs-backend:
+        condition: service_healthy
 
 volumes:
   db-data:
-    driver: local
-  ssl-certs:
     driver: local
