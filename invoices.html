@@ -361,7 +361,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 <div class="form-group"><label>Client Email</label><input id="f-client-email" type="email" placeholder="jane@example.com" oninput="updatePreview()"></div>
                 <div class="form-group"><label>Client Phone</label><input id="f-client-phone" type="tel" placeholder="555-0100" oninput="updatePreview()"></div>
                 <div class="form-group"><label>Linked Case</label>
-                  <select id="f-case-id"><option value="">No linked case</option></select>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <select id="f-case-id" style="flex:1" onchange="toggleCreateCaseBtn()"><option value="">No linked case</option></select>
+                    <button type="button" class="btn btn-sm btn-secondary" id="btn-create-case-from-inv" onclick="createCaseFromInvoice()" title="Create a new case from this invoice's client info" style="white-space:nowrap">➕ New Case</button>
+                  </div>
                 </div>
                 <div class="form-group span2"><label>Billing Address</label><textarea id="f-client-address" rows="2" placeholder="123 Main St, City, State ZIP" oninput="updatePreview()"></textarea></div>
               </div>
@@ -791,6 +794,7 @@ const API = '';
 let allInvoices = [], editingInvId = null, currentSettings = {};
 let lineItems = [];
 let currentLogoDataUrl = null; // base64 from file upload
+let _suppressFormReset = false; // one-shot: skip switchPage auto-reset after programmatic pre-fill (e.g. duplicate)
 let currentUserRole = 'user'; // 'admin' | 'user' — set on init
 
 // ── Palette
@@ -854,7 +858,7 @@ function switchPage(id) {
   document.querySelector(`[data-page="${id}"]`)?.classList.add('active');
   if (id === 'dashboard')     loadDashboard();
   if (id === 'list')          loadInvoiceList();
-  if (id === 'new')           { if (!editingInvId) { resetInvoiceForm(); updatePreview(); } applyRoleUI(); }
+  if (id === 'new')           { if (!editingInvId && !_suppressFormReset) { resetInvoiceForm(); updatePreview(); } _suppressFormReset = false; applyRoleUI(); }
   if (id === 'emaillog')      loadEmailLog();
   if (id === 'settings')      loadSettings();
   if (id === 'contacts')      loadContacts();
@@ -1209,6 +1213,7 @@ async function resetInvoiceForm() {
     document.getElementById('f-case-id').innerHTML = '<option value="">No linked case</option>' +
       cases.map(c => `<option value="${c.id}">${c.client_name}${c.tax_year?' ('+c.tax_year+')':''}</option>`).join('');
   }
+  toggleCreateCaseBtn();
 }
 
 // ── Save invoice
@@ -1313,6 +1318,7 @@ async function editInvoice(id) {
     setVal('f-terms', inv.terms, 'terms');
     setVal('f-footer', inv.footer, 'footer');
     setVal('f-case-id', inv.case_id, 'case_id');
+    toggleCreateCaseBtn();
     setVal('f-payment-link', inv.payment_link, 'payment_link');
     
     // Restore per-invoice branding from custom_fields
@@ -1914,7 +1920,56 @@ function fillFromContact(val) {
   document.getElementById('f-client-phone').value   = phone;
   document.getElementById('f-client-address').value = addr;
   if (caseId) document.getElementById('f-case-id').value = caseId;
+  toggleCreateCaseBtn();
   updatePreview();
+}
+
+// Show the "New Case" button only when the invoice is NOT already linked to a case
+function toggleCreateCaseBtn() {
+  const btn = document.getElementById('btn-create-case-from-inv');
+  if (!btn) return;
+  const linked = document.getElementById('f-case-id').value;
+  btn.style.display = linked ? 'none' : '';
+}
+
+// Create a client case from the current invoice's client info, then link it
+async function createCaseFromInvoice() {
+  const name    = document.getElementById('f-client-name').value.trim();
+  const email   = document.getElementById('f-client-email').value.trim();
+  const phone   = document.getElementById('f-client-phone').value.trim();
+  if (!name) {
+    showAlert('Enter a client name first — it becomes the case client.', 'error', 'inv-alert');
+    return;
+  }
+  const btn = document.getElementById('btn-create-case-from-inv');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const res = await apiFetch('/api/cases', {
+      method: 'POST',
+      body: JSON.stringify({
+        client_name:  name,
+        client_email: email || null,
+        client_phone: phone || null,
+        tax_year:     new Date().getFullYear()
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.caseId) {
+      showAlert('Failed to create case: ' + (data.error || 'Unknown error'), 'error', 'inv-alert');
+      return;
+    }
+    // Refresh the case dropdown so the new case appears, then select it
+    await refreshContactPicker();
+    const sel = document.getElementById('f-case-id');
+    sel.value = String(data.caseId);
+    toggleCreateCaseBtn();
+    updatePreview();
+    showAlert(`Case created for ${name} and linked to this invoice.`, 'success', 'inv-alert');
+  } catch (e) {
+    showAlert('Failed to create case: ' + e.message, 'error', 'inv-alert');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '➕ New Case'; }
+  }
 }
 
 function openNewContactModal() {
@@ -2000,6 +2055,7 @@ async function duplicateInvoice(id) {
   document.getElementById('f-client-phone').value   = inv.client_phone   || '';
   document.getElementById('f-client-address').value = inv.client_address || '';
   document.getElementById('f-case-id').value         = inv.case_id        || '';
+  toggleCreateCaseBtn();
   document.getElementById('f-issue-date').value      = new Date().toISOString().slice(0,10); // today
   document.getElementById('f-due-date').value        = '';
   document.getElementById('f-tax-rate').value        = inv.tax_rate   || 0;
@@ -2008,6 +2064,7 @@ async function duplicateInvoice(id) {
   document.getElementById('f-notes').value           = inv.notes  || '';
   document.getElementById('f-terms').value           = inv.terms  || '';
   document.getElementById('f-footer').value          = inv.footer || '';
+  const plEl = document.getElementById('f-payment-link'); if (plEl) plEl.value = inv.payment_link || '';
 
   // Restore branding
   let cf = {};
@@ -2041,6 +2098,7 @@ async function duplicateInvoice(id) {
 
   document.getElementById('inv-form-title').textContent = `New Invoice (from ${inv.invoice_number})`;
   editingInvId = null;
+  _suppressFormReset = true; // prevent switchPage('new') from wiping the data we just cloned
   switchPage('new');
   showAlert(`New invoice pre-filled from ${inv.invoice_number} — review and save`, 'success', 'inv-alert');
 }
