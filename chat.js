@@ -8,11 +8,9 @@
   // Wait until socket.io client is loaded, then boot
   function loadSocketIO(cb) {
     if (window.io) { cb(); return; }
-    const s = document.createElement('script');
-    s.src = '/socket.io.min.js';
-    s.onload = cb;
-    s.onerror = function () { console.error('[Chat] Could not load socket.io client'); };
-    document.head.appendChild(s);
+    // Socket.io not available - skip chat initialization
+    console.log('[Chat] Socket.io not available - chat disabled');
+    return;
   }
 
   function tryInit() {

@@ -5156,39 +5156,129 @@
           if (s.classList.contains('open')) loadCases();
         }
 
+        let _showArchived = false; // false = active cases, true = archived (closed) cases
+        let _allCasesCache = [];
+
+        function toggleArchivedView() {
+          _showArchived = !_showArchived;
+          renderCasesList();
+        }
+
         async function loadCases() {
           const res = await apiFetch('/api/cases');
           if (!res.ok) return;
-          const cases = await res.json();
+          _allCasesCache = await res.json();
+          renderCasesList();
+        }
+
+        function renderCasesList() {
           const el = document.getElementById('cases-list');
-          if (cases.length === 0) {
-            el.innerHTML = '<div style="text-align:center;color:#aaa;padding:24px;font-size:.85rem">No cases yet — create one to save analyses</div>';
+          const all = _allCasesCache || [];
+          const isClosed = c => (c.status||'').toLowerCase() === 'closed';
+          const active   = all.filter(c => !isClosed(c));
+          const archived = all.filter(isClosed);
+          const list = _showArchived ? archived : active;
+
+          // Toggle control
+          const toggle = `
+            <div style="display:flex;gap:6px;margin-bottom:10px">
+              <button onclick="if(_showArchived)toggleArchivedView()" style="flex:1;padding:6px;font-size:.78rem;font-weight:600;border-radius:7px;cursor:pointer;border:1.5px solid ${!_showArchived?'#5D5CDE':'#e0e0e0'};background:${!_showArchived?'#f5f4ff':'#fff'};color:${!_showArchived?'#5D5CDE':'#888'}">Active (${active.length})</button>
+              <button onclick="if(!_showArchived)toggleArchivedView()" style="flex:1;padding:6px;font-size:.78rem;font-weight:600;border-radius:7px;cursor:pointer;border:1.5px solid ${_showArchived?'#991b1b':'#e0e0e0'};background:${_showArchived?'#fef2f2':'#fff'};color:${_showArchived?'#991b1b':'#888'}">⚫ Archived (${archived.length})</button>
+            </div>`;
+
+          if (list.length === 0) {
+            el.innerHTML = toggle + `<div style="text-align:center;color:#aaa;padding:24px;font-size:.85rem">${_showArchived ? 'No archived cases.' : 'No active cases — create one to get started.'}</div>`;
             return;
           }
-          el.innerHTML = cases.map(c => `
+          el.innerHTML = toggle + list.map(c => `
             <div class="case-item ${currentCaseId===c.id?'active-case':''}" onclick="selectCase(${c.id},'${c.client_name.replace(/'/g,"\'")}')">
               <div class="case-name">${c.client_name}</div>
               <div class="case-meta">
                 ${c.tax_year ? `Tax Year ${c.tax_year} · ` : ''}
                 Balance: $${(c.irs_balance||0).toLocaleString()} ·
-                <span style="color:${c.status==='active'?'#16a34a':'#888'}">${c.status}</span>
+                <span style="color:${caseStatusColor(c.status)};font-weight:600">${caseStatusLabel(c.status)}</span>
               </div>
             </div>`).join('');
         }
 
+        function caseStatusColor(s) {
+          switch ((s||'').toLowerCase()) {
+            case 'active':    return '#16a34a';
+            case 'pending':   return '#d97706';
+            case 'on hold':   return '#64748b';
+            case 'follow up': return '#2563eb';
+            case 'closed':    return '#991b1b';
+            default:          return '#888';
+          }
+        }
+        function caseStatusLabel(s) {
+          const m = {active:'🟢 Active', pending:'🟡 Pending', 'on hold':'⏸️ On Hold', 'follow up':'🔔 Follow Up', closed:'⚫ Closed'};
+          return m[(s||'').toLowerCase()] || (s||'—');
+        }
+
+        async function updateCaseStatus(status) {
+          if (!currentCaseId) return;
+          // Capture previous status for the audit note
+          const prev = (window._currentCaseStatus || 'active');
+          const res = await apiFetch(`/api/cases/${currentCaseId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status })
+          });
+          if (res.ok) {
+            window._currentCaseStatus = status;
+            // Auto-log the status change as a note so the history is a complete timeline
+            if (prev !== status) {
+              await apiFetch(`/api/cases/${currentCaseId}/notes`, {
+                method: 'POST',
+                body: JSON.stringify({ content: `🔄 Status changed: ${caseStatusLabel(prev)} → ${caseStatusLabel(status)}` })
+              }).catch(()=>{});
+              loadCaseNotes(currentCaseId, document.getElementById('notes-case-label')?.textContent || '');
+            }
+            // When closed → archive it: deselect and hide the detail panel
+            if ((status||'').toLowerCase() === 'closed') {
+              showToast('Case closed and moved to Archived', 'success');
+              currentCaseId = null;
+              window._currentCaseStatus = null;
+              const panel = document.getElementById('case-detail-panel');
+              if (panel) panel.style.display = 'none';
+              document.getElementById('case-owner-label').textContent = 'Your cases';
+            } else {
+              showToast(`Case marked "${status}"`, 'success');
+            }
+            loadCases(); // refresh the list (active vs archived split)
+          } else {
+            showToast('Failed to update status', 'error');
+          }
+        }
+
         async function selectCase(id, name) {
           currentCaseId = id;
+          // Clear any unsaved note text from the previously selected case.
+          // Suppress auto-save during this clear so the blur handler doesn't
+          // write the old draft to the newly-selected case.
+          _noteAutoSaving = true;
+          const noteBox = document.getElementById('note-input');
+          if (noteBox) noteBox.value = '';
+          const chNoteBox = document.getElementById('ch-note-input');
+          if (chNoteBox) chNoteBox.value = '';
+          setTimeout(() => { _noteAutoSaving = false; }, 0);
           document.getElementById('case-owner-label').textContent = `Case: ${name}`;
           document.querySelectorAll('.case-item').forEach(el => el.classList.remove('active-case'));
-          event.currentTarget.classList.add('active-case');
-          // Load the case's saved analysis data
+          if (event && event.currentTarget) event.currentTarget.classList.add('active-case');
+          // Load the case's saved analysis data + status
           const res = await apiFetch(`/api/cases/${id}`);
           if (res.ok) {
             const c = await res.json();
             if (c.analysis_data) {
               try { loadAnalysisFromCase(JSON.parse(c.analysis_data)); } catch {}
             }
+            const sel = document.getElementById('case-status-select');
+            if (sel) sel.value = (c.status || 'active').toLowerCase();
+            window._currentCaseStatus = (c.status || 'active').toLowerCase();
           }
+          // Reveal the case detail panel (status + follow-ups)
+          const panel = document.getElementById('case-detail-panel');
+          if (panel) panel.style.display = '';
           // Load notes into notes panel
           loadCaseNotes(id, name);
         }
@@ -5243,19 +5333,36 @@
         }
 
         async function loadCaseNotes(caseId, caseName) {
-          document.getElementById('case-notes-panel').style.display = '';
-          document.getElementById('notes-case-label').textContent = caseName;
+          const label = document.getElementById('notes-case-label');
+          if (label) label.textContent = caseName;
           const res = await apiFetch(`/api/cases/${caseId}/notes`);
           if (!res.ok) return;
           const notes = await res.json();
           document.getElementById('notes-list').innerHTML = notes.length === 0
-            ? '<div style="color:#aaa;font-size:.85rem">No notes yet</div>'
+            ? '<div style="color:#aaa;font-size:.85rem">No follow-ups yet</div>'
             : notes.map(n => `
                 <div class="note-bubble">
                   ${n.pinned ? '<span class="note-pin">📌</span>' : ''}
-                  <div>${n.content.replace(/\n/g,'<br>')}</div>
+                  <button onclick="deleteNote(${n.id})" title="Delete note"
+                    style="position:absolute;top:6px;right:8px;background:none;border:none;color:#c0392b;font-size:.8rem;cursor:pointer;opacity:.6">🗑️</button>
+                  <div style="padding-right:18px">${n.content.replace(/\n/g,'<br>')}</div>
                   <div class="note-meta">By ${n.author_username} · ${new Date(n.created_at*1000).toLocaleString()}</div>
                 </div>`).join('');
+        }
+
+        async function deleteNote(noteId) {
+          if (!currentCaseId || !noteId) return;
+          if (!confirm('Delete this note? This cannot be undone.')) return;
+          const res = await apiFetch(`/api/cases/${currentCaseId}/notes/${noteId}`, { method: 'DELETE' });
+          if (res.ok) {
+            showToast('Note deleted', 'success');
+            loadCaseNotes(currentCaseId, document.getElementById('notes-case-label')?.textContent || '');
+            // keep history modal in sync if it's open
+            const hm = document.getElementById('case-history-modal');
+            if (hm && hm.style.display === 'flex') renderCaseHistory();
+          } else {
+            showToast('Failed to delete note', 'error');
+          }
         }
 
         async function addNote() {
@@ -5268,6 +5375,30 @@
           if (res.ok) {
             document.getElementById('note-input').value = '';
             loadCaseNotes(currentCaseId, document.getElementById('notes-case-label').textContent);
+          }
+        }
+
+        // Auto-save the follow-up note when the user clicks away from the box (blur).
+        // Guarded so switching cases (which clears the box) does not trigger a save.
+        let _noteAutoSaving = false;
+        async function autoSaveNote() {
+          if (_noteAutoSaving) return;
+          if (!currentCaseId) return;
+          const box = document.getElementById('note-input');
+          const content = (box?.value || '').trim();
+          if (!content) return;
+          _noteAutoSaving = true;
+          try {
+            const res = await apiFetch(`/api/cases/${currentCaseId}/notes`, {
+              method: 'POST', body: JSON.stringify({ content })
+            });
+            if (res.ok) {
+              box.value = '';
+              showToast('Follow-up saved', 'success');
+              loadCaseNotes(currentCaseId, document.getElementById('notes-case-label')?.textContent || '');
+            }
+          } finally {
+            _noteAutoSaving = false;
           }
         }
 
@@ -6472,6 +6603,31 @@
   <div class="cases-sidebar-body" id="cases-list">
     <div style="text-align:center;color:#aaa;padding:24px;font-size:.85rem">Loading cases…</div>
   </div>
+  <!-- Case detail: status + follow-up notes (shown when a case is selected) -->
+  <div id="case-detail-panel" style="display:none;border-top:1px solid #eee;padding:12px;max-height:46%;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <strong id="notes-case-label" style="font-size:.85rem;color:#1a1a2e">Case</strong>
+    </div>
+    <label style="font-size:.72rem;font-weight:700;color:#667;text-transform:uppercase;display:block;margin-bottom:4px">Status</label>
+    <select id="case-status-select" onchange="updateCaseStatus(this.value)"
+            style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:.85rem;outline:none;margin-bottom:12px">
+      <option value="active">🟢 Active</option>
+      <option value="pending">🟡 Pending</option>
+      <option value="on hold">⏸️ On Hold</option>
+      <option value="follow up">🔔 Follow Up</option>
+      <option value="closed">⚫ Closed</option>
+    </select>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <label style="font-size:.72rem;font-weight:700;color:#667;text-transform:uppercase">Follow-ups &amp; Notes</label>
+      <button onclick="openCaseHistory()" style="background:none;border:none;color:#5D5CDE;font-size:.75rem;font-weight:700;cursor:pointer;padding:0">🕑 Full History</button>
+    </div>
+    <div id="notes-list" style="margin-bottom:8px"></div>
+    <textarea id="note-input" class="note-input" placeholder="Add a follow-up or note… (saves when you click away or press the button)" onblur="autoSaveNote()"></textarea>
+    <button class="tab-button" onclick="addNote()"
+            style="width:100%;padding:8px;margin-top:6px;background:#5D5CDE;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600;font-size:.85rem">+ Add Follow-up</button>
+  </div>
+
   <div class="cases-sidebar-footer" style="display:flex;flex-direction:column;gap:8px">
     <button class="tab-button" style="width:100%;padding:10px;background:linear-gradient(135deg,#5D5CDE,#3498db);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600" onclick="openNewCaseModal()">+ New Case</button>
     <button class="tab-button" id="btn-save-case" style="display:none;width:100%;padding:10px;background:#16a34a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600" onclick="saveCurrentAnalysisToCase()">💾 Save Analysis to Case</button>
@@ -6498,6 +6654,101 @@
     </div>
   </div>
 </div>
+
+<!-- Case History Modal -->
+<div id="case-history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:700;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;width:640px;max-width:92vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,.3)">
+    <div style="padding:18px 24px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;border-radius:14px 14px 0 0">
+      <div>
+        <h3 style="font-size:1.05rem;font-weight:700" id="ch-title">Case History</h3>
+        <div style="font-size:.75rem;color:#aab;margin-top:2px" id="ch-subtitle"></div>
+      </div>
+      <button onclick="closeCaseHistory()" style="background:none;border:none;color:#ccc;font-size:1.4rem;cursor:pointer;line-height:1">✕</button>
+    </div>
+    <div id="ch-timeline" style="padding:20px 24px;overflow-y:auto;flex:1">
+      <div style="color:#aaa;text-align:center;padding:30px">Loading…</div>
+    </div>
+    <div style="padding:14px 24px;border-top:1px solid #eee;display:flex;gap:8px">
+      <textarea id="ch-note-input" class="note-input" placeholder="Add a follow-up or note…" style="flex:1;min-height:52px"></textarea>
+      <button onclick="addNoteFromHistory()" style="padding:0 18px;background:#5D5CDE;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600;white-space:nowrap">+ Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Case History modal: full timeline of notes + status changes
+  async function openCaseHistory() {
+    if (!currentCaseId) { showToast('Select a case first', 'error'); return; }
+    const modal = document.getElementById('case-history-modal');
+    modal.style.display = 'flex';
+    document.getElementById('ch-subtitle').textContent =
+      document.getElementById('notes-case-label')?.textContent || '';
+    await renderCaseHistory();
+  }
+  function closeCaseHistory() {
+    document.getElementById('case-history-modal').style.display = 'none';
+  }
+  async function renderCaseHistory() {
+    const tl = document.getElementById('ch-timeline');
+    const res = await apiFetch(`/api/cases/${currentCaseId}/notes`);
+    if (!res.ok) { tl.innerHTML = '<div style="color:#c00;text-align:center;padding:20px">Failed to load history.</div>'; return; }
+    const notes = await res.json();
+    if (!notes.length) { tl.innerHTML = '<div style="color:#aaa;text-align:center;padding:30px">No history yet.</div>'; return; }
+    // Chronological: oldest at top so the timeline reads top→down
+    const chron = [...notes].sort((a,b) => (a.created_at||0) - (b.created_at||0));
+    tl.innerHTML = chron.map(n => {
+      const isStatus = /^🔄 Status changed/.test(n.content||'');
+      const when = new Date(n.created_at*1000).toLocaleString();
+      const dot  = isStatus ? '#2563eb' : '#5D5CDE';
+      return `
+        <div style="display:flex;gap:12px;margin-bottom:16px">
+          <div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:center">
+            <div style="width:11px;height:11px;border-radius:50%;background:${dot};margin-top:4px"></div>
+            <div style="flex:1;width:2px;background:#e8e8e8;margin-top:2px"></div>
+          </div>
+          <div style="flex:1;position:relative;${isStatus?'background:#f0f6ff;border:1px solid #d8e6ff;':'background:#f8f9ff;border:1px solid #e8ecff;'}border-radius:8px;padding:10px 12px">
+            ${n.pinned ? '<span style="position:absolute;top:8px;right:28px;color:#5D5CDE">📌</span>' : ''}
+            ${isStatus ? '' : `<button onclick="deleteNoteFromHistory(${n.id})" title="Delete note" style="position:absolute;top:6px;right:8px;background:none;border:none;color:#c0392b;font-size:.8rem;cursor:pointer;opacity:.6">🗑️</button>`}
+            <div style="font-size:.88rem;color:#1a1a2e;padding-right:${isStatus?'0':'18px'}">${(n.content||'').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
+            <div style="font-size:.72rem;color:#999;margin-top:6px">${n.author_username||'—'} · ${when}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+  async function addNoteFromHistory() {
+    const ta = document.getElementById('ch-note-input');
+    const content = ta.value.trim();
+    if (!content || !currentCaseId) return;
+    const res = await apiFetch(`/api/cases/${currentCaseId}/notes`, {
+      method: 'POST', body: JSON.stringify({ content })
+    });
+    if (res.ok) {
+      ta.value = '';
+      await renderCaseHistory();
+      // keep the sidebar list in sync too
+      loadCaseNotes(currentCaseId, document.getElementById('notes-case-label')?.textContent || '');
+    } else {
+      showToast('Failed to add note', 'error');
+    }
+  }
+  async function deleteNoteFromHistory(noteId) {
+    if (!currentCaseId || !noteId) return;
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    const res = await apiFetch(`/api/cases/${currentCaseId}/notes/${noteId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Note deleted', 'success');
+      await renderCaseHistory();
+      loadCaseNotes(currentCaseId, document.getElementById('notes-case-label')?.textContent || '');
+    } else {
+      showToast('Failed to delete note', 'error');
+    }
+  }
+  // Close on backdrop click
+  document.addEventListener('click', e => {
+    const m = document.getElementById('case-history-modal');
+    if (m && e.target === m) closeCaseHistory();
+  });
+</script>
 
 <script src="/chat.js"></script>
 </body>

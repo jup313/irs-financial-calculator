@@ -195,6 +195,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .builder-wrap{grid-template-columns:1fr}
   .preview-panel{position:static}
 }
+/* Business info collapsed state */
+.biz-info-collapsed{display:none !important}
 </style>
 </head>
 <body>
@@ -230,6 +232,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="sidebar-item" data-page="contacts" onclick="switchPage('contacts')">👤 Contacts <span class="count" id="contacts-count">0</span></div>
     <div class="sidebar-section">Settings</div>
     <div class="sidebar-item" data-page="settings" onclick="switchPage('settings')">⚙️ Email & Business</div>
+    <div class="sidebar-item" data-page="pending-edits" id="sidebar-pending-edits" style="display:none" onclick="switchPage('pending-edits')">🔔 Pending Edits <span class="count" id="pending-count">0</span></div>
   </aside>
 
   <main class="main">
@@ -293,12 +296,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <!-- LEFT: Form -->
         <div>
           <!-- YOUR BUSINESS INFO (per-invoice override) -->
-          <div class="card">
-            <div class="card-header">
+          <div class="card" id="biz-info-card">
+            <div class="card-header" style="cursor:pointer" onclick="toggleBizInfo()">
               <h3>🏢 Your Business Info</h3>
-              <button class="btn btn-secondary btn-sm" onclick="fillFromSettings()">↙ Load from Settings</button>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button type="button" class="btn btn-secondary btn-sm" id="biz-info-toggle-btn" onclick="event.stopPropagation();toggleBizInfo()">Show ▼</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();fillFromSettings()">↙ Load from Settings</button>
+              </div>
             </div>
-            <div class="card-body">
+            <div class="card-body biz-info-collapsed" id="biz-info-body">
               <div class="form-grid" style="margin-bottom:12px">
                 <div class="form-group span2">
                   <!-- Logo upload / URL -->
@@ -313,7 +319,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                     <div style="flex:1;min-width:150px">
                       <label style="display:block;margin-bottom:4px">Or paste Logo URL</label>
                       <input id="f-biz-logo-url" type="url" placeholder="https://…/logo.png" oninput="updateLogoFromUrl(this.value)" style="width:100%">
-                      <button class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="clearLogo()">✕ Remove Logo</button>
+                      <button type="button" class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%" onclick="clearLogo()">✕ Remove Logo</button>
                     </div>
                   </div>
                 </div>
@@ -355,7 +361,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 <div class="form-group"><label>Client Email</label><input id="f-client-email" type="email" placeholder="jane@example.com" oninput="updatePreview()"></div>
                 <div class="form-group"><label>Client Phone</label><input id="f-client-phone" type="tel" placeholder="555-0100" oninput="updatePreview()"></div>
                 <div class="form-group"><label>Linked Case</label>
-                  <select id="f-case-id"><option value="">No linked case</option></select>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <select id="f-case-id" style="flex:1" onchange="toggleCreateCaseBtn()"><option value="">No linked case</option></select>
+                    <button type="button" class="btn btn-sm btn-secondary" id="btn-create-case-from-inv" onclick="createCaseFromInvoice()" title="Create a new case from this invoice's client info" style="white-space:nowrap">➕ New Case</button>
+                  </div>
                 </div>
                 <div class="form-group span2"><label>Billing Address</label><textarea id="f-client-address" rows="2" placeholder="123 Main St, City, State ZIP" oninput="updatePreview()"></textarea></div>
               </div>
@@ -406,15 +415,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 <div class="form-group"><label>Notes (visible on invoice)</label><textarea id="f-notes" rows="2" placeholder="Thank you for your business!" oninput="updatePreview()"></textarea></div>
                 <div class="form-group"><label>Payment Terms</label><textarea id="f-terms" rows="2" placeholder="Payment due within 30 days." oninput="updatePreview()"></textarea></div>
                 <div class="form-group"><label>Footer Line</label><input id="f-footer" type="text" placeholder="e.g. EIN: 00-0000000 | Licensed in TX" oninput="updatePreview()"></div>
+                <div class="form-group"><label>Payment Link (PayPal, Stripe, Square, etc.)</label><input id="f-payment-link" type="url" placeholder="https://paypal.me/yourbusiness/" oninput="updatePreview()"></div>
               </div>
             </div>
-            <div style="min-width:240px">
+            <div style="min-width:240px" id="totals-panel">
               <div class="card" style="margin-bottom:0">
                 <div class="card-header"><h3>💰 Totals</h3></div>
                 <div class="card-body">
                   <div class="form-group" style="margin-bottom:8px"><label>Tax Rate (%)</label><input id="f-tax-rate" type="number" min="0" max="100" step="0.01" value="0" oninput="recalcTotals()"></div>
                   <div class="form-group" style="margin-bottom:12px"><label>Discount ($)</label><input id="f-discount" type="number" min="0" step="0.01" value="0" oninput="recalcTotals()"></div>
-                  <div class="totals-box">
+                  <div class="totals-box" id="totals-display">
                     <div class="totals-row"><span>Subtotal</span><span id="t-subtotal">$0.00</span></div>
                     <div class="totals-row"><span id="t-tax-label">Tax (0%)</span><span id="t-tax">$0.00</span></div>
                     <div class="totals-row"><span>Discount</span><span id="t-disc">-$0.00</span></div>
@@ -425,6 +435,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 </div>
               </div>
             </div>
+          </div>
+          <!-- Non-admin notice: totals hidden -->
+          <div id="totals-hidden-notice" style="display:none;background:#f0f4ff;border:1px solid #c7d7f8;border-radius:8px;padding:12px 16px;font-size:.84rem;color:#3b4fa8;margin-top:4px">
+            ℹ️ Totals are set by an admin and are not visible to regular users. Your edit will be reviewed before being applied.
           </div>
         </div>
 
@@ -503,6 +517,20 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div class="card">
         <table><thead><tr><th>Date</th><th>To</th><th>Subject</th><th>Invoice</th><th>Status</th></tr></thead>
         <tbody id="email-log-body"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ══ PENDING EDITS (admin only) ══════════════════════════════════════ -->
+    <div id="page-pending-edits" class="page">
+      <div class="page-header">
+        <div class="page-title">Pending Invoice Edits</div>
+        <button class="btn btn-secondary" onclick="loadPendingEdits()">↻ Refresh</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Invoice #</th><th>Client</th><th>Proposed By</th><th>Submitted</th><th>Actions</th></tr></thead>
+          <tbody id="pending-edits-body"></tbody>
+        </table>
       </div>
     </div>
 
@@ -698,6 +726,24 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
 </div>
 
+<!-- APPROVE / REJECT EDIT MODAL (admin) -->
+<div class="modal-bg" id="approve-modal">
+  <div class="modal" style="max-width:620px">
+    <h3>🔍 Review Proposed Edit — <span id="approve-inv-num"></span></h3>
+    <div id="approve-alert" class="alert"></div>
+    <div id="approve-diff" style="max-height:50vh;overflow-y:auto;margin-bottom:14px"></div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Rejection Reason (required only if rejecting)</label>
+      <input id="approve-reject-reason" type="text" placeholder="e.g. Incorrect line item pricing">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeApproveModal()">Cancel</button>
+      <button class="btn btn-danger" id="btn-do-reject" onclick="doRejectEdit()">✗ Reject Edit</button>
+      <button class="btn btn-primary" id="btn-do-approve" onclick="doApproveEdit()" style="background:linear-gradient(135deg,#16a34a,#15803d)">✅ Approve Edit</button>
+    </div>
+  </div>
+</div>
+
 <!-- MARK PAID MODAL -->
 <div class="modal-bg" id="mark-paid-modal">
   <div class="modal" style="max-width:420px">
@@ -748,6 +794,8 @@ const API = '';
 let allInvoices = [], editingInvId = null, currentSettings = {};
 let lineItems = [];
 let currentLogoDataUrl = null; // base64 from file upload
+let _suppressFormReset = false; // one-shot: skip switchPage auto-reset after programmatic pre-fill (e.g. duplicate)
+let currentUserRole = 'user'; // 'admin' | 'user' — set on init
 
 // ── Palette
 const PALETTE = ['#5D5CDE','#2563eb','#0891b2','#059669','#16a34a','#d97706','#dc2626','#7c3aed','#db2777','#1a1a2e'];
@@ -774,17 +822,47 @@ function showAlert(msg, type='error', id='alert-global') {
   setTimeout(() => { el.className = 'alert'; }, 4000);
 }
 
+// ── Apply role-based visibility across the UI
+function applyRoleUI() {
+  const isAdmin = currentUserRole === 'admin';
+  // Totals panel on invoice form
+  const totalsPanel = document.getElementById('totals-panel');
+  if (totalsPanel) totalsPanel.style.display = isAdmin ? '' : 'none';
+  const totalsNotice = document.getElementById('totals-hidden-notice');
+  if (totalsNotice) totalsNotice.style.display = isAdmin ? 'none' : '';
+  // Admin-only: pending edits panel in sidebar
+  const pendingItem = document.getElementById('sidebar-pending-edits');
+  if (pendingItem) pendingItem.style.display = isAdmin ? '' : 'none';
+}
+
+// ── Business info section toggle
+let bizInfoExpanded = false;
+function toggleBizInfo() {
+  const body = document.getElementById('biz-info-body');
+  const btn  = document.getElementById('biz-info-toggle-btn');
+  if (!body || !btn) return;
+  bizInfoExpanded = !bizInfoExpanded;
+  if (bizInfoExpanded) {
+    body.classList.remove('biz-info-collapsed');
+    btn.textContent = 'Hide ▲';
+  } else {
+    body.classList.add('biz-info-collapsed');
+    btn.textContent = 'Show ▼';
+  }
+}
+
 function switchPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
   document.getElementById(`page-${id}`).classList.add('active');
   document.querySelector(`[data-page="${id}"]`)?.classList.add('active');
-  if (id === 'dashboard') loadDashboard();
-  if (id === 'list')      loadInvoiceList();
-  if (id === 'new')       { if (!editingInvId) resetInvoiceForm(); updatePreview(); }
-  if (id === 'emaillog')  loadEmailLog();
-  if (id === 'settings')  loadSettings();
-  if (id === 'contacts')  loadContacts();
+  if (id === 'dashboard')     loadDashboard();
+  if (id === 'list')          loadInvoiceList();
+  if (id === 'new')           { if (!editingInvId && !_suppressFormReset) { resetInvoiceForm(); updatePreview(); } _suppressFormReset = false; applyRoleUI(); }
+  if (id === 'emaillog')      loadEmailLog();
+  if (id === 'settings')      loadSettings();
+  if (id === 'contacts')      loadContacts();
+  if (id === 'pending-edits') loadPendingEdits();
 }
 
 function switchSettingsTab(id) {
@@ -875,14 +953,18 @@ function fillFromSettings() {
   document.getElementById('f-biz-website').value = c.business_website || '';
   document.getElementById('f-biz-email').value   = c.smtp_from_email  || '';
   document.getElementById('f-footer').value       = c.business_footer  || '';
-  // Logo
+  // Logo — use saved data URL first, then URL from settings
   const logoSrc = c._logoDataUrl || c.business_logo_url || '';
-  document.getElementById('f-biz-logo-url').value = c.business_logo_url || '';
+  document.getElementById('f-biz-logo-url').value = logoSrc.startsWith('data:') ? '' : logoSrc;
   currentLogoDataUrl = logoSrc || null;
-  if (logoSrc) {
-    const thumb = document.getElementById('logo-thumb');
+  const thumb = document.getElementById('logo-thumb');
+  const logoText = document.getElementById('logo-drop-text');
+  if (logoSrc && thumb) {
     thumb.src = logoSrc; thumb.style.display='block';
-    document.getElementById('logo-drop-text').style.display='none';
+    if (logoText) logoText.style.display='none';
+  } else if (thumb) {
+    thumb.style.display='none';
+    if (logoText) logoText.style.display='block';
   }
   updatePreview();
   showAlert('Business info loaded from settings', 'success');
@@ -904,6 +986,7 @@ function getPreviewData() {
   return {
     color,
     logo,
+    paymentLink: document.getElementById('f-payment-link')?.value || '',
     biz: {
       name:    document.getElementById('f-biz-name')?.value    || '',
       phone:   document.getElementById('f-biz-phone')?.value   || '',
@@ -952,7 +1035,6 @@ function buildPreviewHtml(d, compact=false) {
   }).join('');
 
   return `
-    <style>:root{--inv-color:${c}}</style>
     <div class="inv-header">
       <div>
         ${logoHtml}
@@ -961,7 +1043,6 @@ function buildPreviewHtml(d, compact=false) {
       <div style="text-align:right">
         <div class="inv-title">INVOICE</div>
         <div style="font-size:.85rem;color:#666;margin-top:4px">${d.inv.num}</div>
-        <div style="margin-top:6px"><span class="status-stamp">DRAFT</span></div>
       </div>
     </div>
 
@@ -996,6 +1077,12 @@ function buildPreviewHtml(d, compact=false) {
       ${d.paid > 0 ? `<div class="tot-row"><span>Amount Paid</span><span style="color:#16a34a">-${fmtMoney(d.paid)}</span></div>` : ''}
       <div class="tot-row bal"><span>Balance Due</span><span>${fmtMoney(d.balance)}</span></div>
     </div>
+
+    ${d.paymentLink ? `
+    <div class="inv-payment" style="margin:20px 0;padding:15px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;text-align:center">
+      <p style="margin:0 0 8px 0;font-size:.9rem;color:#0369a1"><strong>Pay Online</strong></p>
+      <a href="${d.paymentLink}" target="_blank" style="display:inline-block;padding:10px 24px;background:#0284c7;color:#fff;text-decoration:none;border-radius:4px;font-weight:600">Pay Now</a>
+    </div>` : ''}
 
     ${d.notes||d.terms||d.footer ? `
     <div class="inv-footer">
@@ -1053,12 +1140,20 @@ function renderLineItems() {
   document.getElementById('line-items-body').innerHTML = lineItems.map((item, i) => `
     <tr>
       <td style="padding-left:14px"><input type="text" value="${(item.description||'').replace(/"/g,'&quot;')}" placeholder="Description" oninput="lineItems[${i}].description=this.value;updatePreview()"></td>
-      <td><input type="number" value="${item.quantity||1}" min="0" step="0.01" style="width:65px" oninput="lineItems[${i}].quantity=parseFloat(this.value)||0;recalcTotals()"></td>
-      <td><input type="number" value="${item.unit_price||0}" min="0" step="0.01" oninput="lineItems[${i}].unit_price=parseFloat(this.value)||0;recalcTotals()"></td>
-      <td style="text-align:right;font-weight:600;color:#333">${fmtMoney((item.quantity||1)*(item.unit_price||0))}</td>
+      <td><input type="number" value="${item.quantity||1}" min="0" step="0.01" style="width:65px" oninput="lineItems[${i}].quantity=parseFloat(this.value)||0;updateLineAmt(${i})"></td>
+      <td><input type="number" value="${item.unit_price||0}" min="0" step="0.01" oninput="lineItems[${i}].unit_price=parseFloat(this.value)||0;updateLineAmt(${i})"></td>
+      <td id="line-amt-${i}" style="text-align:right;font-weight:600;color:#333">${fmtMoney((item.quantity||1)*(item.unit_price||0))}</td>
       <td style="text-align:center"><input type="checkbox" ${item.taxable!==false?'checked':''} onchange="lineItems[${i}].taxable=this.checked;recalcTotals()" style="width:15px;height:15px"></td>
       <td><button class="del-btn" onclick="removeLine(${i})" ${lineItems.length===1?'disabled':''}>✕</button></td>
     </tr>`).join('');
+}
+
+// Update a single line's amount cell without re-rendering the whole table (preserves focus)
+function updateLineAmt(i) {
+  const item = lineItems[i];
+  const cell = document.getElementById(`line-amt-${i}`);
+  if (cell) cell.textContent = fmtMoney((item.quantity||1) * (item.unit_price||0));
+  recalcTotals();
 }
 
 function addLineItem() { lineItems.push({ description:'', quantity:1, unit_price:0, taxable:true }); renderLineItems(); recalcTotals(); }
@@ -1080,7 +1175,8 @@ function recalcTotals() {
   document.getElementById('t-total').textContent = fmtMoney(total);
   document.getElementById('t-balance').textContent = fmtMoney(balance);
   document.getElementById('t-balance').style.color = balance > 0 ? '#dc2626' : '#16a34a';
-  renderLineItems();
+  // NOTE: do NOT call renderLineItems() here — that destroys inputs and kills focus.
+  // renderLineItems() is only called when the list structure changes (add/remove).
   updatePreview();
 }
 
@@ -1098,14 +1194,14 @@ async function resetInvoiceForm() {
   document.getElementById('f-notes').value   = '';
   document.getElementById('f-terms').value   = currentSettings.business_terms || 'Payment due within 30 days.';
   document.getElementById('f-footer').value  = currentSettings.business_footer || '';
+  document.getElementById('f-payment-link').value = '';
   document.getElementById('f-tax-rate').value = '0';
   document.getElementById('f-discount').value = '0';
   document.getElementById('f-amount-paid').value = '0';
   document.getElementById('f-inv-color').value = '#5D5CDE';
   lineItems = [{ description:'', quantity:1, unit_price:0, taxable:true }];
-  clearLogo();
   initColorSwatches();
-  // Auto-fill from settings + refresh contact/case picker
+  // Auto-fill from settings (this also loads the logo) + refresh contact/case picker
   fillFromSettings();
   refreshContactPicker();
   renderLineItems();
@@ -1117,6 +1213,7 @@ async function resetInvoiceForm() {
     document.getElementById('f-case-id').innerHTML = '<option value="">No linked case</option>' +
       cases.map(c => `<option value="${c.id}">${c.client_name}${c.tax_year?' ('+c.tax_year+')':''}</option>`).join('');
   }
+  toggleCreateCaseBtn();
 }
 
 // ── Save invoice
@@ -1135,6 +1232,7 @@ async function saveInvoice(statusOverride) {
     notes: document.getElementById('f-notes').value,
     terms: document.getElementById('f-terms').value,
     footer: document.getElementById('f-footer').value,
+    payment_link: document.getElementById('f-payment-link').value.trim(),
     status: statusOverride || 'draft',
     items: lineItems,
     custom_fields: {
@@ -1154,56 +1252,140 @@ async function saveInvoice(statusOverride) {
   const res    = await apiFetch(url, { method, body: JSON.stringify(payload) });
   const data   = await res.json();
   if (!res.ok) { showAlert(data.error, 'error', 'inv-alert'); return; }
-  showAlert(editingInvId ? 'Invoice updated!' : `Invoice ${data.invoiceNumber} created!`, 'success', 'inv-alert');
+  if (data.pending) {
+    showAlert('Edit submitted for admin approval. Your changes are pending review.', 'success', 'inv-alert');
+  } else {
+    showAlert(editingInvId ? 'Invoice updated!' : `Invoice ${data.invoiceNumber} created!`, 'success', 'inv-alert');
+  }
   editingInvId = null;
   setTimeout(() => switchPage('list'), 900);
 }
 
 // ── Edit invoice
 async function editInvoice(id) {
-  const res = await apiFetch(`/api/invoices/${id}`);
-  if (!res.ok) return;
-  const inv = await res.json();
-  editingInvId = id;
-  await resetInvoiceForm();
-  document.getElementById('inv-form-title').textContent = `Edit: ${inv.invoice_number}`;
-  document.getElementById('f-inv-num').value    = inv.invoice_number;
-  document.getElementById('f-client-name').value  = inv.client_name || '';
-  document.getElementById('f-client-email').value = inv.client_email || '';
-  document.getElementById('f-client-phone').value = inv.client_phone || '';
-  document.getElementById('f-client-address').value = inv.client_address || '';
-  document.getElementById('f-issue-date').value = inv.issue_date || '';
-  document.getElementById('f-due-date').value   = inv.due_date   || '';
-  document.getElementById('f-tax-rate').value   = inv.tax_rate   || 0;
-  document.getElementById('f-discount').value   = inv.discount   || 0;
-  document.getElementById('f-amount-paid').value = inv.amount_paid || 0;
-  document.getElementById('f-notes').value  = inv.notes  || '';
-  document.getElementById('f-terms').value  = inv.terms  || '';
-  document.getElementById('f-footer').value = inv.footer || '';
-  document.getElementById('f-case-id').value = inv.case_id || '';
-  // Restore per-invoice branding from custom_fields
-  let cf = {};
-  try { cf = typeof inv.custom_fields === 'string' ? JSON.parse(inv.custom_fields) : (inv.custom_fields || {}); } catch(e){}
-  document.getElementById('f-biz-name').value    = cf.biz_name    || currentSettings.business_name    || '';
-  document.getElementById('f-biz-phone').value   = cf.biz_phone   || currentSettings.business_phone   || '';
-  document.getElementById('f-biz-address').value = cf.biz_address || currentSettings.business_address || '';
-  document.getElementById('f-biz-website').value = cf.biz_website || currentSettings.business_website || '';
-  document.getElementById('f-biz-email').value   = cf.biz_email   || currentSettings.smtp_from_email  || '';
-  const logoSrc = cf.biz_logo || '';
-  currentLogoDataUrl = logoSrc || null;
-  if (logoSrc) {
+  try {
+    console.log('Starting editInvoice for ID:', id);
+    const res = await apiFetch(`/api/invoices/${id}`);
+    if (!res.ok) {
+      const errData = await res.json();
+      console.error('Failed to load invoice:', errData);
+      showAlert('Failed to load invoice: ' + (errData.error || 'Unknown error'), 'error');
+      return;
+    }
+    const inv = await res.json();
+    console.log('Edit invoice FULL data from API:', JSON.stringify(inv, null, 2));
+    
+    // Check if we got actual data or just defaults
+    if (!inv.invoice_number && !inv.client_name) {
+      console.error('API returned empty invoice data!');
+      showAlert('Error: Invoice data is empty', 'error');
+      return;
+    }
+    
+    editingInvId = id;
+    
+    // Switch to new invoice page first
+    switchPage('new');
+    
+    // Wait for page transition
+    await new Promise(r => setTimeout(r, 100));
+    
+    // Populate form fields directly
+    const setVal = (id, val, fieldName) => {
+      const el = document.getElementById(id);
+      if (el) {
+        const safeVal = val !== null && val !== undefined ? val : '';
+        el.value = safeVal;
+        console.log(`Set ${fieldName} (${id}) = "${safeVal}"`);
+      } else {
+        console.error(`Element not found: ${id} for field ${fieldName}`);
+      }
+    };
+    
+    document.getElementById('inv-form-title').textContent = `Edit: ${inv.invoice_number || 'Invoice'}`;
+    
+    setVal('f-inv-num', inv.invoice_number, 'invoice_number');
+    setVal('f-client-name', inv.client_name, 'client_name');
+    setVal('f-client-email', inv.client_email, 'client_email');
+    setVal('f-client-phone', inv.client_phone, 'client_phone');
+    setVal('f-client-address', inv.client_address, 'client_address');
+    setVal('f-issue-date', inv.issue_date, 'issue_date');
+    setVal('f-due-date', inv.due_date, 'due_date');
+    setVal('f-tax-rate', inv.tax_rate, 'tax_rate');
+    setVal('f-discount', inv.discount, 'discount');
+    setVal('f-amount-paid', inv.amount_paid, 'amount_paid');
+    setVal('f-notes', inv.notes, 'notes');
+    setVal('f-terms', inv.terms, 'terms');
+    setVal('f-footer', inv.footer, 'footer');
+    setVal('f-case-id', inv.case_id, 'case_id');
+    toggleCreateCaseBtn();
+    setVal('f-payment-link', inv.payment_link, 'payment_link');
+    
+    // Restore per-invoice branding from custom_fields
+    let cf = {};
+    try { 
+      cf = typeof inv.custom_fields === 'string' ? JSON.parse(inv.custom_fields) : (inv.custom_fields || {}); 
+      console.log('Parsed custom_fields:', cf);
+    } catch(e){ 
+      console.error('Error parsing custom_fields:', e);
+      cf = {}; 
+    }
+    
+    setVal('f-biz-name', cf.biz_name || currentSettings?.business_name || '', 'biz_name');
+    setVal('f-biz-phone', cf.biz_phone || currentSettings?.business_phone || '', 'biz_phone');
+    setVal('f-biz-address', cf.biz_address || currentSettings?.business_address || '', 'biz_address');
+    setVal('f-biz-website', cf.biz_website || currentSettings?.business_website || '', 'biz_website');
+    setVal('f-biz-email', cf.biz_email || currentSettings?.smtp_from_email || '', 'biz_email');
+    
+    // Handle logo
+    const logoSrc = cf.biz_logo || '';
+    currentLogoDataUrl = logoSrc || null;
     const thumb = document.getElementById('logo-thumb');
-    thumb.src = logoSrc; thumb.style.display='block';
-    document.getElementById('logo-drop-text').style.display='none';
-    document.getElementById('f-biz-logo-url').value = logoSrc.startsWith('data:') ? '' : logoSrc;
+    const logoText = document.getElementById('logo-drop-text');
+    const logoUrlInput = document.getElementById('f-biz-logo-url');
+    
+    if (logoSrc && thumb && logoText) {
+      thumb.src = logoSrc;
+      thumb.style.display = 'block';
+      logoText.style.display = 'none';
+      if (logoUrlInput) logoUrlInput.value = logoSrc.startsWith('data:') ? '' : logoSrc;
+    } else if (thumb && logoText) {
+      thumb.style.display = 'none';
+      logoText.style.display = 'block';
+      if (logoUrlInput) logoUrlInput.value = '';
+    }
+    
+    // Handle color
+    const color = cf.inv_color || '#5D5CDE';
+    const colorInput = document.getElementById('f-inv-color');
+    if (colorInput) colorInput.value = color;
+    document.querySelectorAll('.color-swatch').forEach(s => {
+      s.classList.toggle('selected', s.dataset.color === color);
+    });
+    
+    // Handle line items - use deep copy
+    console.log('Invoice items from API:', inv.items);
+    if (inv.items && inv.items.length > 0) {
+      lineItems = inv.items.map(it => ({
+        description: it.description || '',
+        quantity: it.quantity || 1,
+        unit_price: it.unit_price || 0,
+        taxable: it.taxable !== false
+      }));
+    } else {
+      lineItems = [{ description: '', quantity: 1, unit_price: 0, taxable: true }];
+    }
+    console.log('Set lineItems to:', lineItems);
+    
+    renderLineItems();
+    recalcTotals();
+    updatePreview();
+    
+    console.log('Edit invoice form populated successfully');
+  } catch (err) {
+    console.error('Error in editInvoice:', err);
+    showAlert('Error loading invoice: ' + err.message, 'error');
   }
-  const color = cf.inv_color || '#5D5CDE';
-  document.getElementById('f-inv-color').value = color;
-  document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('selected', s.dataset.color===color));
-  lineItems = inv.items?.length ? inv.items : [{ description:'', quantity:1, unit_price:0, taxable:true }];
-  renderLineItems();
-  recalcTotals();
-  switchPage('new');
 }
 
 async function deleteInvoice(id, num) {
@@ -1291,6 +1473,14 @@ async function loadDashboard() {
   const res = await apiFetch('/api/invoices');
   if (!res.ok) return;
   allInvoices = await res.json();
+  // Refresh pending edit count for admins
+  if (currentUserRole === 'admin') {
+    apiFetch('/api/invoices/pending-edits').then(r => r.ok ? r.json() : []).then(rows => {
+      const cnt = Array.isArray(rows) ? rows.length : 0;
+      const el = document.getElementById('pending-count');
+      if (el) el.textContent = cnt;
+    }).catch(() => {});
+  }
   document.getElementById('inv-count').textContent = allInvoices.length;
   const total        = allInvoices.reduce((s,i)=>s+(i.total||0),0);
   const paidInvs     = allInvoices.filter(i=>i.status==='paid');
@@ -1302,28 +1492,30 @@ async function loadDashboard() {
   const overdue      = overdueInvs.reduce((s,i)=>s+(i.balance_due||0),0);
   const draftAmt     = draftInvs.reduce((s,i)=>s+(i.total||0),0);
 
-  document.getElementById('ds-total').textContent         = fmtMoney(total);
+  const isAdmin = currentUserRole === 'admin';
+  document.getElementById('ds-total').textContent         = isAdmin ? fmtMoney(total) : '—';
   document.getElementById('ds-total-count').textContent   = allInvoices.length + ' invoice' + (allInvoices.length!==1?'s':'');
-  document.getElementById('ds-paid').textContent          = fmtMoney(paid);
+  document.getElementById('ds-paid').textContent          = isAdmin ? fmtMoney(paid) : '—';
   document.getElementById('ds-paid-count').textContent    = paidInvs.length + ' invoice' + (paidInvs.length!==1?'s':'');
-  document.getElementById('ds-outstanding').textContent   = fmtMoney(outstanding);
+  document.getElementById('ds-outstanding').textContent   = isAdmin ? fmtMoney(outstanding) : '—';
   document.getElementById('ds-outstanding-count').textContent = unpaidInvs.length + ' invoice' + (unpaidInvs.length!==1?'s':'');
-  document.getElementById('ds-overdue').textContent       = fmtMoney(overdue);
+  document.getElementById('ds-overdue').textContent       = isAdmin ? fmtMoney(overdue) : '—';
   document.getElementById('ds-overdue-count').textContent = overdueInvs.length + ' invoice' + (overdueInvs.length!==1?'s':'');
-  document.getElementById('ds-draft').textContent         = fmtMoney(draftAmt);
+  document.getElementById('ds-draft').textContent         = isAdmin ? fmtMoney(draftAmt) : '—';
   document.getElementById('ds-draft-count').textContent   = draftInvs.length + ' invoice' + (draftInvs.length!==1?'s':'');
   document.getElementById('dash-invoices').innerHTML = allInvoices.slice(0,10).map(inv=>`
     <tr>
-      <td><strong>${inv.invoice_number}</strong></td>
+      <td><strong>${inv.invoice_number}</strong>${inv.edit_pending ? ' <span style="background:#fef3c7;color:#b45309;font-size:.68rem;padding:2px 6px;border-radius:4px;font-weight:700">⏳ Edit Pending</span>' : ''}</td>
       <td>${inv.client_name}</td>
-      <td>${fmtMoney(inv.total)}</td>
+      <td>${isAdmin ? fmtMoney(inv.total) : '—'}</td>
       <td>${inv.due_date||'—'}</td>
       <td><span class="badge badge-${inv.status}">${inv.status}</span></td>
       <td style="white-space:nowrap">
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
-        <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
+        ${!inv.edit_pending ? `<button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>` : ''}
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
-        ${inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
+        ${isAdmin && inv.edit_pending ? `<button class="btn btn-sm btn-primary" onclick="openApproveModal(${inv.id})" style="margin-left:4px">Review Edit</button>` : ''}
+        ${isAdmin && inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
         <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:24px;color:#aaa">No invoices yet</td></tr>';
@@ -1337,21 +1529,27 @@ async function loadInvoiceList() {
   renderInvoiceList(allInvoices);
 }
 function renderInvoiceList(invoices) {
+  const isAdmin = currentUserRole === 'admin';
   document.getElementById('inv-list-body').innerHTML = invoices.map(inv=>`
     <tr class="${inv.status==='paid'?'row-paid':inv.status==='overdue'?'row-overdue':''}">
-      <td><strong>${inv.invoice_number}</strong></td>
+      <td>
+        <strong>${inv.invoice_number}</strong>
+        ${inv.edit_pending ? '<br><span style="background:#fef3c7;color:#b45309;font-size:.68rem;padding:2px 6px;border-radius:4px;font-weight:700">⏳ Edit Pending</span>' : ''}
+        ${inv.edit_reject_reason ? '<br><span style="background:#fee2e2;color:#dc2626;font-size:.68rem;padding:2px 6px;border-radius:4px;font-weight:700">✗ Edit Rejected</span>' : ''}
+      </td>
       <td>${inv.client_name}<br><span style="font-size:.75rem;color:#aaa">${inv.client_email||''}</span></td>
       <td>${inv.issue_date||'—'}</td><td>${inv.due_date||'—'}</td>
-      <td>${fmtMoney(inv.total)}</td>
-      <td style="color:${(inv.balance_due||0)>0?'#dc2626':'#16a34a'}">${fmtMoney(inv.balance_due)}</td>
+      <td>${isAdmin ? fmtMoney(inv.total) : '—'}</td>
+      <td style="color:${isAdmin ? ((inv.balance_due||0)>0?'#dc2626':'#16a34a') : '#888'}">${isAdmin ? fmtMoney(inv.balance_due) : '—'}</td>
       <td><span class="badge badge-${inv.status}">${inv.status}</span></td>
       <td style="white-space:nowrap">
         <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${inv.id})">View</button>
-        <button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>
+        ${!inv.edit_pending ? `<button class="btn btn-sm btn-secondary" onclick="editInvoice(${inv.id})" style="margin-left:4px">Edit</button>` : ''}
         <button class="btn btn-sm btn-success" onclick="openSendModal(${inv.id})" style="margin-left:4px">📧</button>
-        ${inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
+        ${isAdmin && inv.edit_pending ? `<button class="btn btn-sm btn-primary" onclick="openApproveModal(${inv.id})" style="margin-left:4px">Review Edit</button>` : ''}
+        ${isAdmin && inv.status !== 'paid' && inv.status !== 'cancelled' ? '<button class="btn-mark-paid" onclick="openMarkPaidModal('+inv.id+', '+inv.total+', this.dataset.num)" data-num="'+inv.invoice_number+'" style="margin-left:4px">✅ Mark Paid</button>' : ''}
         <button class="btn btn-sm btn-secondary" onclick="duplicateInvoice(${inv.id})" style="margin-left:4px" title="New invoice from this one">📋</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteInvoice(${inv.id},'${inv.invoice_number}')" style="margin-left:4px">Del</button>
+        ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoice(${inv.id},'${inv.invoice_number}')" style="margin-left:4px">Del</button>` : ''}
       </td>
     </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#aaa">No invoices found</td></tr>';
 }
@@ -1469,6 +1667,28 @@ async function loadSettings() {
   if (!res.ok) return;
   const cfg = await res.json();
   currentSettings = cfg;
+
+  // Fetch logo separately — avoids blocking on large base64 payload
+  apiFetch('/api/email/settings/logo').then(r => r.ok ? r.json() : {}).then(data => {
+    if (data.logo) {
+      currentSettings.business_logo_url = data.logo;
+      currentSettings._logoDataUrl = data.logo;
+      // Update settings page logo thumbnail if visible
+      const t = document.getElementById('s-logo-thumb');
+      const dt = document.getElementById('s-logo-drop-text');
+      if (t) { t.src = data.logo; t.style.display = 'block'; }
+      if (dt) dt.style.display = 'none';
+      // Update invoice form if open and no logo already set
+      const invThumb = document.getElementById('logo-thumb');
+      const invDropText = document.getElementById('logo-drop-text');
+      if (invThumb && !currentLogoDataUrl) {
+        currentLogoDataUrl = data.logo;
+        invThumb.src = data.logo; invThumb.style.display = 'block';
+        if (invDropText) invDropText.style.display = 'none';
+        updatePreview();
+      }
+    }
+  }).catch(() => {});
   document.getElementById('s-smtp-host').value   = cfg.smtp_host     || '';
   document.getElementById('s-smtp-port').value   = cfg.smtp_port     || 587;
   document.getElementById('s-smtp-user').value   = cfg.smtp_user     || '';
@@ -1487,14 +1707,29 @@ async function loadSettings() {
   document.getElementById('s-biz-website').value = cfg.business_website || '';
   document.getElementById('s-biz-email').value   = cfg.business_email   || '';
   document.getElementById('s-biz-footer').value  = cfg.business_footer  || '';
-  document.getElementById('s-biz-logo').value    = cfg.business_logo_url || '';
-  if (cfg.business_logo_url) {
-    const t = document.getElementById('s-logo-thumb');
-    t.src = cfg.business_logo_url; t.style.display = 'block';
-    document.getElementById('s-logo-drop-text').style.display = 'none';
+  // Logo is loaded async via /api/email/settings/logo — show placeholder if has_logo
+  document.getElementById('s-biz-logo').value = '';
+  const logoThumb = document.getElementById('s-logo-thumb');
+  const logoDropText = document.getElementById('s-logo-drop-text');
+  if (cfg.has_logo && logoThumb) {
+    // Logo exists in DB — will be loaded by the async logo fetch above
+    if (logoDropText) logoDropText.textContent = 'Logo saved ✓';
+  } else if (logoThumb) {
+    logoThumb.style.display = 'none';
+    if (logoDropText) { logoDropText.style.display = ''; logoDropText.textContent = 'Click or drag logo here'; }
   }
 }
 async function saveSettings() {
+  // Determine logo to save: prefer newly uploaded file, then typed URL, then existing saved logo
+  const newUpload = (typeof currentSettings._logoDataUrl === 'string' && currentSettings._logoDataUrl.startsWith('data:'))
+    ? currentSettings._logoDataUrl : null;
+  const typedLogoUrl = document.getElementById('s-biz-logo').value.trim();
+  // existingLogo: could be the full data URL already fetched, or will be preserved by backend
+  const existingLogo = (currentSettings.business_logo_url && currentSettings.business_logo_url !== 'undefined')
+    ? currentSettings.business_logo_url : null;
+  // If nothing new provided, send empty string — backend will preserve existing logo
+  const logoToSave = newUpload || typedLogoUrl || existingLogo || '';
+
   const payload = {
     smtp_host: document.getElementById('s-smtp-host').value.trim(),
     smtp_port: parseInt(document.getElementById('s-smtp-port').value)||587,
@@ -1512,11 +1747,14 @@ async function saveSettings() {
     business_address: document.getElementById('s-biz-address').value.trim(),
     business_phone:   document.getElementById('s-biz-phone').value.trim(),
     business_website: document.getElementById('s-biz-website').value.trim(),
-    business_logo_url: currentSettings._logoDataUrl || document.getElementById('s-biz-logo').value.trim()
+    business_email:   document.getElementById('s-biz-email').value.trim(),
+    business_footer:  document.getElementById('s-biz-footer').value.trim(),
+    business_logo_url: logoToSave
   };
   const res = await apiFetch('/api/email/settings',{method:'PUT',body:JSON.stringify(payload)});
   const d = await res.json();
   if (!res.ok) { showAlert(d.error,'error','settings-alert'); return; }
+  currentSettings._logoDataUrl = null; // clear temp after save
   showAlert('Settings saved!','success','settings-alert');
   await loadSettings();
 }
@@ -1682,7 +1920,56 @@ function fillFromContact(val) {
   document.getElementById('f-client-phone').value   = phone;
   document.getElementById('f-client-address').value = addr;
   if (caseId) document.getElementById('f-case-id').value = caseId;
+  toggleCreateCaseBtn();
   updatePreview();
+}
+
+// Show the "New Case" button only when the invoice is NOT already linked to a case
+function toggleCreateCaseBtn() {
+  const btn = document.getElementById('btn-create-case-from-inv');
+  if (!btn) return;
+  const linked = document.getElementById('f-case-id').value;
+  btn.style.display = linked ? 'none' : '';
+}
+
+// Create a client case from the current invoice's client info, then link it
+async function createCaseFromInvoice() {
+  const name    = document.getElementById('f-client-name').value.trim();
+  const email   = document.getElementById('f-client-email').value.trim();
+  const phone   = document.getElementById('f-client-phone').value.trim();
+  if (!name) {
+    showAlert('Enter a client name first — it becomes the case client.', 'error', 'inv-alert');
+    return;
+  }
+  const btn = document.getElementById('btn-create-case-from-inv');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const res = await apiFetch('/api/cases', {
+      method: 'POST',
+      body: JSON.stringify({
+        client_name:  name,
+        client_email: email || null,
+        client_phone: phone || null,
+        tax_year:     new Date().getFullYear()
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.caseId) {
+      showAlert('Failed to create case: ' + (data.error || 'Unknown error'), 'error', 'inv-alert');
+      return;
+    }
+    // Refresh the case dropdown so the new case appears, then select it
+    await refreshContactPicker();
+    const sel = document.getElementById('f-case-id');
+    sel.value = String(data.caseId);
+    toggleCreateCaseBtn();
+    updatePreview();
+    showAlert(`Case created for ${name} and linked to this invoice.`, 'success', 'inv-alert');
+  } catch (e) {
+    showAlert('Failed to create case: ' + e.message, 'error', 'inv-alert');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '➕ New Case'; }
+  }
 }
 
 function openNewContactModal() {
@@ -1768,6 +2055,7 @@ async function duplicateInvoice(id) {
   document.getElementById('f-client-phone').value   = inv.client_phone   || '';
   document.getElementById('f-client-address').value = inv.client_address || '';
   document.getElementById('f-case-id').value         = inv.case_id        || '';
+  toggleCreateCaseBtn();
   document.getElementById('f-issue-date').value      = new Date().toISOString().slice(0,10); // today
   document.getElementById('f-due-date').value        = '';
   document.getElementById('f-tax-rate').value        = inv.tax_rate   || 0;
@@ -1776,6 +2064,7 @@ async function duplicateInvoice(id) {
   document.getElementById('f-notes').value           = inv.notes  || '';
   document.getElementById('f-terms').value           = inv.terms  || '';
   document.getElementById('f-footer').value          = inv.footer || '';
+  const plEl = document.getElementById('f-payment-link'); if (plEl) plEl.value = inv.payment_link || '';
 
   // Restore branding
   let cf = {};
@@ -1809,6 +2098,7 @@ async function duplicateInvoice(id) {
 
   document.getElementById('inv-form-title').textContent = `New Invoice (from ${inv.invoice_number})`;
   editingInvId = null;
+  _suppressFormReset = true; // prevent switchPage('new') from wiping the data we just cloned
   switchPage('new');
   showAlert(`New invoice pre-filled from ${inv.invoice_number} — review and save`, 'success', 'inv-alert');
 }
@@ -1859,10 +2149,7 @@ async function doMarkPaid() {
   const btn = document.getElementById('btn-do-mark-paid');
   btn.disabled = true; btn.textContent = 'Saving…';
 
-  // Determine new status: paid if amount >= total, otherwise keep as sent with partial payment
-  const newStatus = amount >= totalVal ? 'paid' : 'sent';
-
-  // Build notes string to append to invoice notes
+  // Build notes string
   const paymentNote = [
     'Payment received: ' + fmtMoney(amount),
     date ? 'Date: ' + date : '',
@@ -1870,36 +2157,157 @@ async function doMarkPaid() {
     notes || ''
   ].filter(Boolean).join(' | ');
 
-  // Fetch current invoice data to preserve all fields
-  const getRes = await apiFetch(`/api/invoices/${id}`);
-  if (!getRes.ok) { showAlert('Could not load invoice', 'error', 'mark-paid-alert'); btn.disabled=false; btn.textContent='✅ Confirm Payment'; return; }
-  const inv = await getRes.json();
-
-  const updatedNotes = inv.notes ? inv.notes + '\n' + paymentNote : paymentNote;
-  const updatedPaid  = (parseFloat(inv.amount_paid) || 0) + amount;
-
-  const res = await apiFetch(`/api/invoices/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      client_name:    inv.client_name,
-      status:         newStatus,
-      amount_paid:    updatedPaid,
-      notes:          updatedNotes,
-      items:          inv.items || [],
-      tax_rate:       inv.tax_rate,
-      discount:       inv.discount,
-    })
+  const res = await apiFetch(`/api/invoices/${id}/mark-paid`, {
+    method: 'POST',
+    body: JSON.stringify({ amount, notes: paymentNote })
   });
 
   btn.disabled = false; btn.textContent = '✅ Confirm Payment';
   const d = await res.json();
   if (!res.ok) { showAlert(d.error, 'error', 'mark-paid-alert'); return; }
 
-  const msg = newStatus === 'paid'
+  const msg = d.status === 'paid'
     ? `Invoice marked as PAID — ${fmtMoney(amount)} received`
-    : `Partial payment of ${fmtMoney(amount)} recorded — balance due: ${fmtMoney(totalVal - updatedPaid)}`;
+    : `Partial payment of ${fmtMoney(amount)} recorded — balance due: ${fmtMoney(d.balance_due)}`;
   showAlert(msg, 'success', 'mark-paid-alert');
   setTimeout(() => { closeMarkPaidModal(); loadDashboard(); loadInvoiceList(); }, 1500);
+}
+
+// ── Pending edits (admin) ───────────────────────────────────────────────────
+async function loadPendingEdits() {
+  const res = await apiFetch('/api/invoices/pending-edits');
+  if (!res.ok) {
+    if (res.status === 404) {
+      // API endpoint not available - hide pending edits
+      document.getElementById('sidebar-pending-edits').style.display = 'none';
+    }
+    return;
+  }
+  const rows = await res.json();
+  document.getElementById('pending-count').textContent = rows.length;
+  document.getElementById('pending-edits-body').innerHTML = rows.length
+    ? rows.map(r => {
+        let proposed = {};
+        try { proposed = JSON.parse(r.edit_proposed_data || '{}'); } catch(e){}
+        return `<tr>
+          <td><strong>${r.invoice_number}</strong></td>
+          <td>${r.client_name}</td>
+          <td>${r.proposed_by_username || '—'}</td>
+          <td style="font-size:.8rem">${r.edit_proposed_at ? new Date(r.edit_proposed_at*1000).toLocaleString() : '—'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-secondary" onclick="viewInvoice(${r.id})">View Current</button>
+            <button class="btn btn-sm btn-primary" onclick="openApproveModal(${r.id})" style="margin-left:4px">Review</button>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="5" style="text-align:center;padding:24px;color:#aaa">No pending edits</td></tr>';
+}
+
+// ── Approve / reject modal ──────────────────────────────────────────────────
+let _approveModalInvId = null;
+
+async function openApproveModal(id) {
+  _approveModalInvId = id;
+  // Fetch full invoice data
+  const res = await apiFetch(`/api/invoices/${id}`);
+  if (!res.ok) return;
+  const inv = await res.json();
+  let proposed = {};
+  try { proposed = JSON.parse(inv.edit_proposed_data || '{}'); } catch(e){}
+
+  document.getElementById('approve-inv-num').textContent = inv.invoice_number;
+  document.getElementById('approve-reject-reason').value = '';
+  document.getElementById('approve-alert').className = 'alert';
+
+  // Build diff table
+  const fields = [
+    ['Client Name',    inv.client_name,    proposed.client_name],
+    ['Client Email',   inv.client_email,   proposed.client_email],
+    ['Client Phone',   inv.client_phone,   proposed.client_phone],
+    ['Client Address', inv.client_address, proposed.client_address],
+    ['Issue Date',     inv.issue_date,     proposed.issue_date],
+    ['Due Date',       inv.due_date,       proposed.due_date],
+    ['Tax Rate',       inv.tax_rate,       proposed.tax_rate],
+    ['Discount',       inv.discount,       proposed.discount],
+    ['Notes',          inv.notes,          proposed.notes],
+    ['Terms',          inv.terms,          proposed.terms],
+    ['Footer',         inv.footer,         proposed.footer],
+  ];
+
+  const diffRows = fields.map(([label, cur, prop]) => {
+    const changed = String(cur||'') !== String(prop||'');
+    return `<tr style="${changed ? 'background:#fef3c7' : ''}">
+      <td style="font-weight:600;font-size:.8rem;padding:5px 8px;width:120px">${label}</td>
+      <td style="font-size:.8rem;padding:5px 8px;color:#888">${cur != null ? cur : '—'}</td>
+      <td style="font-size:.8rem;padding:5px 8px;font-weight:${changed?'700':'400'};color:${changed?'#1a1a2e':'#888'}">${prop != null ? prop : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const itemRows = (proposed.items || []).map(it =>
+    `<tr><td style="padding:4px 8px;font-size:.8rem">${it.description}</td>
+         <td style="padding:4px 8px;font-size:.8rem;text-align:center">${it.quantity}</td>
+         <td style="padding:4px 8px;font-size:.8rem;text-align:right">${fmtMoney(it.unit_price)}</td></tr>`
+  ).join('');
+
+  document.getElementById('approve-diff').innerHTML = `
+    <div style="margin-bottom:10px">
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:6px">Field Changes <span style="background:#fef3c7;color:#b45309;padding:2px 6px;border-radius:3px">Highlighted = changed</span></div>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #f0f0f0;border-radius:8px;overflow:hidden">
+        <thead><tr style="background:#f8f9fa">
+          <th style="padding:5px 8px;font-size:.7rem;text-align:left">Field</th>
+          <th style="padding:5px 8px;font-size:.7rem;text-align:left">Current</th>
+          <th style="padding:5px 8px;font-size:.7rem;text-align:left">Proposed</th>
+        </tr></thead>
+        <tbody>${diffRows}</tbody>
+      </table>
+    </div>
+    ${proposed.items?.length ? `
+    <div>
+      <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:6px">Proposed Line Items</div>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #f0f0f0;border-radius:8px;overflow:hidden">
+        <thead><tr style="background:#f8f9fa">
+          <th style="padding:5px 8px;font-size:.7rem;text-align:left">Description</th>
+          <th style="padding:5px 8px;font-size:.7rem;text-align:center">Qty</th>
+          <th style="padding:5px 8px;font-size:.7rem;text-align:right">Price</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+    </div>` : ''}
+  `;
+  document.getElementById('approve-modal').classList.add('open');
+}
+
+function closeApproveModal() {
+  document.getElementById('approve-modal').classList.remove('open');
+  _approveModalInvId = null;
+}
+
+async function doApproveEdit() {
+  if (!_approveModalInvId) return;
+  const btn = document.getElementById('btn-do-approve');
+  btn.disabled = true; btn.textContent = 'Approving…';
+  const res = await apiFetch(`/api/invoices/${_approveModalInvId}/approve-edit`, { method: 'POST' });
+  const d = await res.json();
+  btn.disabled = false; btn.textContent = '✅ Approve Edit';
+  if (!res.ok) { showAlert(d.error, 'error', 'approve-alert'); return; }
+  showAlert('Edit approved and applied.', 'success', 'approve-alert');
+  setTimeout(() => { closeApproveModal(); loadPendingEdits(); loadInvoiceList(); loadDashboard(); }, 1200);
+}
+
+async function doRejectEdit() {
+  if (!_approveModalInvId) return;
+  const reason = document.getElementById('approve-reject-reason').value.trim();
+  const btn = document.getElementById('btn-do-reject');
+  btn.disabled = true; btn.textContent = 'Rejecting…';
+  const res = await apiFetch(`/api/invoices/${_approveModalInvId}/reject-edit`, {
+    method: 'POST',
+    body: JSON.stringify({ reason })
+  });
+  const d = await res.json();
+  btn.disabled = false; btn.textContent = '✗ Reject Edit';
+  if (!res.ok) { showAlert(d.error, 'error', 'approve-alert'); return; }
+  showAlert('Edit rejected.', 'success', 'approve-alert');
+  setTimeout(() => { closeApproveModal(); loadPendingEdits(); loadInvoiceList(); loadDashboard(); }, 1200);
 }
 
 function signOut() {
@@ -1926,8 +2334,10 @@ function signOut() {
       return;
     }
     const user = await res.json();
+    currentUserRole = user.role || 'user';
     document.getElementById('nav-user').textContent = user.username;
     if (user.role==='admin') document.getElementById('btn-admin-link').style.display='';
+    applyRoleUI();
     initColorSwatches();
     // Load dashboard and contacts immediately — settings loads in background
     loadDashboard();

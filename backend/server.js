@@ -285,6 +285,17 @@ async function initDb() {
     // email_settings additions
     `ALTER TABLE email_settings ADD COLUMN business_email TEXT`,
     `ALTER TABLE email_settings ADD COLUMN business_footer TEXT`,
+    `ALTER TABLE invoices ADD COLUMN payment_link TEXT`,
+    // invoice edit-approval workflow
+    `ALTER TABLE invoices ADD COLUMN edit_pending         INTEGER DEFAULT 0`,
+    `ALTER TABLE invoices ADD COLUMN edit_proposed_data   TEXT`,
+    `ALTER TABLE invoices ADD COLUMN edit_proposed_by     INTEGER REFERENCES users(id)`,
+    `ALTER TABLE invoices ADD COLUMN edit_proposed_at     INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN edit_approved_by     INTEGER REFERENCES users(id)`,
+    `ALTER TABLE invoices ADD COLUMN edit_approved_at     INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN edit_rejected_by     INTEGER REFERENCES users(id)`,
+    `ALTER TABLE invoices ADD COLUMN edit_rejected_at     INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN edit_reject_reason   TEXT`,
   ];
   for (const m of migrations) await dbRun(m).catch(() => {});
 
@@ -1280,24 +1291,31 @@ app.delete('/api/admin/db/tables/:table/rows/:rowid', requireAuth, requireAdmin,
 // EMAIL SETTINGS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Get current user's email settings (passwords masked)
+// Get current user's email settings (passwords masked, logo stripped)
 app.get('/api/email/settings', requireAuth, async (req, res) => {
   try {
-    const row = await dbGet('SELECT * FROM email_settings WHERE user_id=?', [req.user.userId]);
+    const row = await dbGet(
+      `SELECT user_id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,
+              smtp_from_name,smtp_from_email,imap_host,imap_port,imap_secure,
+              imap_user,imap_pass,business_name,business_address,business_phone,
+              business_website,business_email,business_footer,updated_at,
+              CASE WHEN business_logo_url IS NOT NULL AND business_logo_url != '' AND business_logo_url != 'undefined' THEN 1 ELSE 0 END AS has_logo
+       FROM email_settings WHERE user_id=?`, [req.user.userId]);
     if (!row) return res.json({});
     const safe = { ...row };
-    // Mask passwords
     if (safe.smtp_pass) safe.smtp_pass = '••••••••';
     if (safe.imap_pass) safe.imap_pass = '••••••••';
-    // If the logo is a large base64 data URL (stored from file upload),
-    // strip it from the response to avoid sending 100KB+ on every settings load.
-    // The frontend will re-upload or use the URL field instead.
-    if (safe.business_logo_url && safe.business_logo_url.startsWith('data:')) {
-      safe.business_logo_url = '';  // don't send base64 back — too large
-      safe._has_logo = true;        // let the client know a logo exists
-    }
     res.json(safe);
   } catch (err) { res.status(500).json({ error: 'Failed to load settings' }); }
+});
+
+// Get logo only — separate endpoint to avoid blocking on large base64 payloads
+app.get('/api/email/settings/logo', requireAuth, async (req, res) => {
+  try {
+    const row = await dbGet('SELECT business_logo_url FROM email_settings WHERE user_id=?', [req.user.userId]);
+    const logo = (row?.business_logo_url && row.business_logo_url !== 'undefined') ? row.business_logo_url : null;
+    res.json({ logo });
+  } catch (err) { res.status(500).json({ error: 'Failed to load logo' }); }
 });
 
 // Save/update email settings
@@ -1315,6 +1333,12 @@ app.put('/api/email/settings', requireAuth, async (req, res) => {
     const finalSmtpPass = (smtp_pass && smtp_pass !== '••••••••') ? smtp_pass : (existing?.smtp_pass || null);
     const finalImapPass = (imap_pass && imap_pass !== '••••••••') ? imap_pass : (existing?.imap_pass || null);
 
+    // Preserve existing logo if client sends empty string
+    // (happens when backend stripped the base64 from GET response)
+    const finalLogo = business_logo_url && business_logo_url !== 'undefined'
+      ? business_logo_url
+      : (existing?.business_logo_url || null);
+
     if (existing) {
       await dbRun(`UPDATE email_settings SET
         smtp_host=?,smtp_port=?,smtp_secure=?,smtp_user=?,smtp_pass=?,
@@ -1327,7 +1351,7 @@ app.put('/api/email/settings', requireAuth, async (req, res) => {
          smtp_from_name||null, smtp_from_email||null,
          imap_host||null, imap_port||993, imap_secure?1:0, imap_user||null, finalImapPass,
          business_name||null, business_address||null, business_phone||null, business_website||null,
-         business_logo_url||null, business_email||null, business_footer||null,
+         finalLogo, business_email||null, business_footer||null,
          req.user.userId]);
     } else {
       await dbRun(`INSERT INTO email_settings
@@ -1440,6 +1464,31 @@ function calcInvoiceTotals(items, taxRate, discount) {
   return { subtotal: Math.round(subtotal*100)/100, tax_amount: tax, total, balance_due: total };
 }
 
+// Strip financial totals from invoice rows for non-admin users
+function stripTotals(inv) {
+  const { subtotal, tax_rate, tax_amount, discount, total, amount_paid, balance_due, ...rest } = inv;
+  return {
+    ...rest,
+    subtotal: null, tax_rate: null, tax_amount: null,
+    discount: null, total: null, amount_paid: null, balance_due: null,
+  };
+}
+
+// ── Admin: list all pending edits — MUST be before /api/invoices/:id
+app.get('/api/invoices/pending-edits', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT i.id, i.invoice_number, i.client_name, i.edit_proposed_at, i.edit_proposed_data,
+              u.username AS proposed_by_username
+       FROM invoices i
+       LEFT JOIN users u ON u.id = i.edit_proposed_by
+       WHERE i.edit_pending = 1
+       ORDER BY i.edit_proposed_at ASC`
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: 'Failed to fetch pending edits' }); }
+});
+
 // List invoices (own, or all for admin)
 app.get('/api/invoices', requireAuth, async (req, res) => {
   try {
@@ -1450,7 +1499,7 @@ app.get('/api/invoices', requireAuth, async (req, res) => {
         : `SELECT * FROM invoices WHERE owner_id=? ORDER BY updated_at DESC`,
       isAdmin ? [] : [req.user.userId]
     );
-    res.json(rows);
+    res.json(isAdmin ? rows : rows.map(stripTotals));
   } catch (err) { res.status(500).json({ error: 'Failed to fetch invoices' }); }
 });
 
@@ -1461,15 +1510,20 @@ app.get('/api/invoices/:id', requireAuth, async (req, res) => {
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
     if (req.user.role !== 'admin' && inv.owner_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
     const items = await dbAll('SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order,id', [req.params.id]);
-    res.json({ ...inv, items });
-  } catch (err) { res.status(500).json({ error: 'Failed to fetch invoice' }); }
+    const full = { ...inv, items };
+    console.log('API: Returning invoice', req.params.id, 'with fields:', Object.keys(full));
+    res.json(req.user.role === 'admin' ? full : stripTotals(full));
+  } catch (err) { 
+    console.error('API Error fetching invoice:', err);
+    res.status(500).json({ error: 'Failed to fetch invoice' }); 
+  }
 });
 
 // Create invoice
 app.post('/api/invoices', requireAuth, async (req, res) => {
   const {
     case_id, client_name, client_email, client_address, client_phone,
-    issue_date, due_date, tax_rate, discount, notes, terms, footer, custom_fields,
+    issue_date, due_date, tax_rate, discount, notes, terms, footer, payment_link, custom_fields,
     items = []
   } = req.body ?? {};
   if (!client_name?.trim()) return res.status(400).json({ error: 'client_name is required' });
@@ -1481,14 +1535,14 @@ app.post('/api/invoices', requireAuth, async (req, res) => {
     const r = await dbRun(`INSERT INTO invoices
       (invoice_number,owner_id,case_id,client_name,client_email,client_address,client_phone,
        subtotal,tax_rate,tax_amount,discount,total,balance_due,
-       issue_date,due_date,notes,terms,footer,custom_fields,status)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       issue_date,due_date,notes,terms,footer,payment_link,custom_fields,status)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [invNum, req.user.userId, case_id||null, client_name.trim(), client_email||null,
        client_address||null, client_phone||null,
        totals.subtotal, parseFloat(tax_rate||0), totals.tax_amount,
        parseFloat(discount||0), totals.total, totals.balance_due,
        issue_date||new Date().toISOString().slice(0,10),
-       due_date||null, notes||null, terms||null, footer||null,
+       due_date||null, notes||null, terms||null, footer||null, payment_link||null,
        custom_fields ? JSON.stringify(custom_fields) : null, 'draft']);
 
     const invId = r.lastID;
@@ -1507,6 +1561,7 @@ app.post('/api/invoices', requireAuth, async (req, res) => {
 });
 
 // Update invoice (replaces all line items)
+// Admins: direct save. Users: submit for admin approval (pending edit).
 app.put('/api/invoices/:id', requireAuth, async (req, res) => {
   try {
     const inv = await dbGet('SELECT * FROM invoices WHERE id=?', [req.params.id]);
@@ -1516,27 +1571,66 @@ app.put('/api/invoices/:id', requireAuth, async (req, res) => {
 
     const {
       client_name, client_email, client_address, client_phone,
-      issue_date, due_date, tax_rate, discount, notes, terms, footer, custom_fields,
+      issue_date, due_date, tax_rate, discount, notes, terms, footer, payment_link, custom_fields,
       status, amount_paid, items = []
     } = req.body ?? {};
 
+    // ── Non-admin users: queue a pending edit for admin approval
+    if (req.user.role !== 'admin') {
+      if (inv.edit_pending) {
+        return res.status(409).json({ error: 'This invoice already has a pending edit awaiting admin approval.' });
+      }
+      const proposedData = JSON.stringify({
+        client_name:    client_name    ?? inv.client_name,
+        client_email:   client_email   ?? inv.client_email,
+        client_address: client_address ?? inv.client_address,
+        client_phone:   client_phone   ?? inv.client_phone,
+        issue_date:     issue_date     ?? inv.issue_date,
+        due_date:       due_date       ?? inv.due_date,
+        tax_rate:       tax_rate       ?? inv.tax_rate,
+        discount:       discount       ?? inv.discount,
+        notes:          notes          ?? inv.notes,
+        terms:          terms          ?? inv.terms,
+        footer:         footer         ?? inv.footer,
+        payment_link:   payment_link   ?? inv.payment_link,
+        custom_fields:  custom_fields  ?? (inv.custom_fields ? JSON.parse(inv.custom_fields) : null),
+        items,
+      });
+      await dbRun(`UPDATE invoices SET
+        edit_pending=1, edit_proposed_data=?, edit_proposed_by=?,
+        edit_proposed_at=strftime('%s','now'),
+        edit_approved_by=NULL, edit_approved_at=NULL,
+        edit_rejected_by=NULL, edit_rejected_at=NULL, edit_reject_reason=NULL
+        WHERE id=?`,
+        [proposedData, req.user.userId, req.params.id]);
+      await audit(req.user.userId, req.user.username, 'propose_invoice_edit', 'invoice',
+        parseInt(req.params.id), req.ip, req.headers['user-agent'], 'Pending admin approval');
+      return res.json({ success: true, pending: true, message: 'Edit submitted for admin approval.' });
+    }
+
+    // ── Admin: direct save
     const totals  = calcInvoiceTotals(items, tax_rate ?? inv.tax_rate, discount ?? inv.discount);
     const paid    = parseFloat(amount_paid ?? inv.amount_paid ?? 0);
     const balance = Math.round((totals.total - paid) * 100) / 100;
 
+    // Admins can mark paid via status field
+    const newStatus = status ?? inv.status;
+
     await dbRun(`UPDATE invoices SET
       client_name=?,client_email=?,client_address=?,client_phone=?,
       subtotal=?,tax_rate=?,tax_amount=?,discount=?,total=?,amount_paid=?,balance_due=?,
-      issue_date=?,due_date=?,notes=?,terms=?,footer=?,custom_fields=?,status=?,
+      issue_date=?,due_date=?,notes=?,terms=?,footer=?,payment_link=?,custom_fields=?,status=?,
+      edit_pending=0, edit_proposed_data=NULL, edit_proposed_by=NULL, edit_proposed_at=NULL,
+      edit_approved_by=NULL, edit_approved_at=NULL,
       updated_at=strftime('%s','now') WHERE id=?`,
       [client_name??inv.client_name, client_email??inv.client_email,
        client_address??inv.client_address, client_phone??inv.client_phone,
        totals.subtotal, parseFloat(tax_rate??inv.tax_rate), totals.tax_amount,
        parseFloat(discount??inv.discount), totals.total, paid, balance,
        issue_date??inv.issue_date, due_date??inv.due_date,
-       notes??inv.notes, terms??inv.terms, footer??inv.footer,
+       notes??inv.notes, terms??inv.terms, footer??inv.footer, payment_link??inv.payment_link,
        custom_fields ? JSON.stringify(custom_fields) : inv.custom_fields,
-       status??inv.status, req.params.id]);
+       newStatus, req.params.id]);
 
     // Replace line items
     await dbRun('DELETE FROM invoice_items WHERE invoice_id=?', [req.params.id]);
@@ -1554,16 +1648,119 @@ app.put('/api/invoices/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Delete invoice
-app.delete('/api/invoices/:id', requireAuth, async (req, res) => {
+// ── Admin: approve a pending edit
+app.post('/api/invoices/:id/approve-edit', requireAuth, requireAdmin, async (req, res) => {
   try {
     const inv = await dbGet('SELECT * FROM invoices WHERE id=?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (req.user.role !== 'admin' && inv.owner_id !== req.user.userId) return res.status(403).json({ error: 'Access denied' });
+    if (!inv.edit_pending) return res.status(400).json({ error: 'No pending edit on this invoice' });
+
+    const proposed = JSON.parse(inv.edit_proposed_data);
+    const items = proposed.items || [];
+    const totals = calcInvoiceTotals(items, proposed.tax_rate, proposed.discount);
+    const paid   = parseFloat(inv.amount_paid ?? 0);
+    const balance = Math.round((totals.total - paid) * 100) / 100;
+
+    await dbRun(`UPDATE invoices SET
+      client_name=?,client_email=?,client_address=?,client_phone=?,
+      subtotal=?,tax_rate=?,tax_amount=?,discount=?,total=?,balance_due=?,
+      issue_date=?,due_date=?,notes=?,terms=?,footer=?,custom_fields=?,
+      edit_pending=0, edit_proposed_data=NULL, edit_proposed_by=NULL, edit_proposed_at=NULL,
+      edit_approved_by=?, edit_approved_at=strftime('%s','now'),
+      edit_rejected_by=NULL, edit_rejected_at=NULL, edit_reject_reason=NULL,
+      updated_at=strftime('%s','now') WHERE id=?`,
+      [proposed.client_name, proposed.client_email, proposed.client_address, proposed.client_phone,
+       totals.subtotal, parseFloat(proposed.tax_rate||0), totals.tax_amount,
+       parseFloat(proposed.discount||0), totals.total, balance,
+       proposed.issue_date, proposed.due_date,
+       proposed.notes, proposed.terms, proposed.footer,
+       proposed.custom_fields ? JSON.stringify(proposed.custom_fields) : null,
+       req.user.userId, req.params.id]);
+
+    // Replace line items
+    await dbRun('DELETE FROM invoice_items WHERE invoice_id=?', [req.params.id]);
+    for (let idx = 0; idx < items.length; idx++) {
+      const it = items[idx];
+      const amt = Math.round(parseFloat(it.quantity||1) * parseFloat(it.unit_price||0) * 100) / 100;
+      await dbRun('INSERT INTO invoice_items (invoice_id,sort_order,description,quantity,unit_price,amount,taxable) VALUES (?,?,?,?,?,?,?)',
+        [req.params.id, idx, it.description||'', parseFloat(it.quantity||1), parseFloat(it.unit_price||0), amt, it.taxable!==false?1:0]);
+    }
+    await audit(req.user.userId, req.user.username, 'approve_invoice_edit', 'invoice',
+      parseInt(req.params.id), req.ip, req.headers['user-agent'], `Approved edit from user ${inv.edit_proposed_by}`);
+    res.json({ success: true });
+  } catch (err) {
+    log.error({ err: err.message }, 'approve invoice edit failed');
+    res.status(500).json({ error: 'Failed to approve edit' });
+  }
+});
+
+// ── Admin: reject a pending edit
+app.post('/api/invoices/:id/reject-edit', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const inv = await dbGet('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (!inv.edit_pending) return res.status(400).json({ error: 'No pending edit on this invoice' });
+
+    const { reason } = req.body ?? {};
+    await dbRun(`UPDATE invoices SET
+      edit_pending=0, edit_proposed_data=NULL, edit_proposed_by=NULL, edit_proposed_at=NULL,
+      edit_rejected_by=?, edit_rejected_at=strftime('%s','now'), edit_reject_reason=?,
+      updated_at=strftime('%s','now') WHERE id=?`,
+      [req.user.userId, reason || null, req.params.id]);
+    await audit(req.user.userId, req.user.username, 'reject_invoice_edit', 'invoice',
+      parseInt(req.params.id), req.ip, req.headers['user-agent'], `Rejected: ${reason || '(no reason)'}`);
+    res.json({ success: true });
+  } catch (err) {
+    log.error({ err: err.message }, 'reject invoice edit failed');
+    res.status(500).json({ error: 'Failed to reject edit' });
+  }
+});
+
+// (duplicate pending-edits removed — moved above /api/invoices/:id)
+
+// Delete invoice
+// Delete invoice — admin only
+app.delete('/api/invoices/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const inv = await dbGet('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
     await dbRun('DELETE FROM invoices WHERE id=?', [req.params.id]);
     await audit(req.user.userId, req.user.username, 'delete_invoice', 'invoice', parseInt(req.params.id), req.ip, req.headers['user-agent'], inv.invoice_number);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Failed to delete invoice' }); }
+});
+
+// ── Mark invoice as paid (admin only)
+app.post('/api/invoices/:id/mark-paid', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const inv = await dbGet('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (inv.status === 'paid') return res.status(400).json({ error: 'Invoice is already paid' });
+    if (inv.status === 'cancelled') return res.status(400).json({ error: 'Cannot mark a cancelled invoice as paid' });
+
+    const { amount, notes: payNotes } = req.body ?? {};
+    const totalVal = parseFloat(inv.total || 0);
+    const payAmount = amount ? parseFloat(amount) : totalVal;
+    if (isNaN(payAmount) || payAmount <= 0) return res.status(400).json({ error: 'Invalid payment amount' });
+
+    const updatedPaid = Math.round(((parseFloat(inv.amount_paid) || 0) + payAmount) * 100) / 100;
+    const newBalance  = Math.round((totalVal - updatedPaid) * 100) / 100;
+    const newStatus   = updatedPaid >= totalVal ? 'paid' : inv.status;
+
+    const updatedNotes = [inv.notes, payNotes].filter(Boolean).join('\n');
+
+    await dbRun(`UPDATE invoices SET
+      status=?, amount_paid=?, balance_due=?, notes=?,
+      updated_at=strftime('%s','now') WHERE id=?`,
+      [newStatus, updatedPaid, newBalance, updatedNotes || null, req.params.id]);
+    await audit(req.user.userId, req.user.username, 'mark_invoice_paid', 'invoice',
+      parseInt(req.params.id), req.ip, req.headers['user-agent'],
+      `Amount: ${payAmount}, Status: ${newStatus}`);
+    res.json({ success: true, status: newStatus, balance_due: newBalance });
+  } catch (err) {
+    log.error({ err: err.message }, 'mark paid failed');
+    res.status(500).json({ error: 'Failed to mark invoice as paid' });
+  }
 });
 
 // Send invoice by email
@@ -1622,109 +1819,189 @@ app.post('/api/invoices/:id/send', requireAuth, async (req, res) => {
 
 // ── Invoice HTML builder
 function buildInvoiceHtml(inv, items, cfg, customMessage) {
-  const fmt = (n) => `$${(parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2})}`;
-  const logo = cfg?.business_logo_url
-    ? `<img src="${cfg.business_logo_url}" style="max-height:60px;max-width:200px;margin-bottom:8px">`
+  const fmt = (n) => `$${(parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+
+  // Pull branding from custom_fields first, fall back to business settings
+  let cf = {};
+  try { cf = typeof inv.custom_fields === 'string' ? JSON.parse(inv.custom_fields) : (inv.custom_fields || {}); } catch(e){}
+
+  const logo     = cf.biz_logo || cfg?.business_logo_url
+    ? `<img src="${cf.biz_logo || cfg?.business_logo_url}" style="max-height:70px;max-width:180px;display:block;margin-bottom:10px">`
     : '';
-  const bizName    = cfg?.business_name    || 'IRS Financial Calculator';
-  const bizAddress = cfg?.business_address ? cfg.business_address.replace(/\n/g,'<br>') : '';
-  const bizPhone   = cfg?.business_phone   || '';
-  const statusColors = { draft:'#888', sent:'#2563eb', paid:'#16a34a', overdue:'#dc2626', cancelled:'#6b7280' };
-  const statusColor = statusColors[inv.status] || '#888';
+  const bizName    = cf.biz_name    || cfg?.business_name    || '';
+  const bizAddress = (cf.biz_address || cfg?.business_address || '').replace(/\n/g,'<br>');
+  const bizPhone   = cf.biz_phone   || cfg?.business_phone   || '';
+  const bizEmail   = cf.biz_email   || cfg?.smtp_from_email  || '';
+  const bizWebsite = cf.biz_website || cfg?.business_website || '';
+
+  // Only show status badge for non-draft statuses
+  const showStatus = inv.status && inv.status !== 'draft';
+  const statusColors = { sent:'#2563eb', paid:'#16a34a', overdue:'#dc2626', cancelled:'#6b7280' };
+  const statusColor = statusColors[inv.status] || '#2563eb';
+  const statusBadge = showStatus
+    ? `<span style="display:inline-block;padding:4px 14px;border-radius:4px;font-size:.75rem;font-weight:700;letter-spacing:.5px;color:#fff;background:${statusColor};text-transform:uppercase">${inv.status}</span>`
+    : '';
+
+  const balanceColor = (parseFloat(inv.balance_due)||0) > 0 ? '#dc2626' : '#16a34a';
 
   return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  body{font-family:Arial,sans-serif;color:#333;margin:0;padding:0;background:#f5f5f5}
-  .wrap{max-width:700px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)}
-  .header{background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start}
-  .header .biz{font-size:.9rem;opacity:.85}
-  .header h1{font-size:2rem;margin:0;color:#a8a7ff}
-  .meta{padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #eee}
-  .meta-box h4{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:6px}
-  .meta-box p{margin:2px 0;font-size:.9rem}
-  .status-badge{display:inline-block;padding:4px 12px;border-radius:100px;font-size:.78rem;font-weight:700;color:#fff;background:${statusColor}}
-  .items{padding:0 40px}
-  table{width:100%;border-collapse:collapse;margin:20px 0}
-  th{background:#f8f9fa;padding:10px 12px;text-align:left;font-size:.78rem;text-transform:uppercase;letter-spacing:.4px;color:#555}
-  td{padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:.9rem}
-  .text-right{text-align:right}
-  .totals{padding:16px 40px;background:#f8f9fa}
-  .total-row{display:flex;justify-content:space-between;padding:5px 0;font-size:.9rem}
-  .total-row.grand{font-size:1.1rem;font-weight:700;border-top:2px solid #e0e0e0;margin-top:8px;padding-top:8px}
-  .total-row.balance{color:${inv.balance_due > 0 ? '#dc2626' : '#16a34a'};font-weight:700}
-  .footer-section{padding:24px 40px;border-top:1px solid #eee;font-size:.82rem;color:#666}
-  .msg-box{padding:16px 40px;background:#fffbe6;border-left:4px solid #f59e0b;font-size:.88rem;color:#555}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1a1a1a;background:#eef0f3;padding:20px 0}
+  .page{max-width:680px;margin:0 auto;background:#fff;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+  /* Header */
+  .inv-header{padding:36px 48px 28px;border-bottom:3px solid #1a1a2e;display:flex;justify-content:space-between;align-items:flex-start}
+  .inv-title{font-size:2.2rem;font-weight:800;letter-spacing:2px;color:#1a1a2e;line-height:1}
+  .inv-num{font-size:.95rem;color:#555;margin-top:4px}
+  .biz-info{font-size:.82rem;color:#444;line-height:1.7}
+  .biz-name{font-size:1rem;font-weight:700;color:#1a1a2e;margin-bottom:4px}
+  /* Bill-to / details grid */
+  .inv-meta{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid #e5e7eb}
+  .meta-col{padding:24px 48px}
+  .meta-col:first-child{border-right:1px solid #e5e7eb}
+  .meta-label{font-size:.65rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#9ca3af;margin-bottom:8px}
+  .meta-value{font-size:.9rem;color:#1a1a1a;line-height:1.6}
+  /* Items table */
+  .items-section{padding:0 48px}
+  table{width:100%;border-collapse:collapse;margin:24px 0 0}
+  thead tr{border-bottom:2px solid #1a1a2e}
+  th{font-size:.65rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6b7280;padding:10px 8px;text-align:left}
+  th.r{text-align:right}
+  tbody tr{border-bottom:1px solid #f3f4f6}
+  tbody tr:last-child{border-bottom:none}
+  td{padding:11px 8px;font-size:.88rem;color:#374151;vertical-align:top}
+  td.r{text-align:right}
+  td.desc{font-weight:500;color:#1a1a1a}
+  /* Totals */
+  .totals-wrap{display:flex;justify-content:flex-end;padding:20px 48px 24px;border-top:1px solid #f3f4f6}
+  .totals-box{width:260px}
+  .t-row{display:flex;justify-content:space-between;padding:5px 0;font-size:.87rem;color:#6b7280}
+  .t-row span:last-child{color:#374151}
+  .t-divider{border-top:2px solid #1a1a2e;margin:8px 0}
+  .t-grand{display:flex;justify-content:space-between;padding:8px 0;font-size:1.05rem;font-weight:700;color:#1a1a2e}
+  .t-balance{display:flex;justify-content:space-between;padding:6px 0;font-size:1rem;font-weight:700;color:${balanceColor}}
+  /* Message box */
+  .msg-box{margin:0 48px 0;padding:14px 18px;background:#fffbe6;border-left:4px solid #f59e0b;font-size:.87rem;color:#555;line-height:1.6}
+  /* Notes / terms */
+  .notes-section{padding:20px 48px;border-top:1px solid #e5e7eb;font-size:.82rem;color:#6b7280;line-height:1.7}
+  .notes-section strong{color:#374151}
+  /* Payment CTA */
+  .pay-section{margin:0 48px 24px;padding:20px 24px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;text-align:center}
+  .pay-btn{display:inline-block;padding:12px 36px;background:#0284c7;color:#fff !important;text-decoration:none;border-radius:5px;font-weight:700;font-size:.95rem;margin-top:10px;letter-spacing:.3px}
+  /* Footer */
+  .inv-footer{padding:16px 48px;background:#f9fafb;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;font-size:.72rem;color:#9ca3af}
 </style>
 </head>
-<body><div class="wrap">
-  <div class="header">
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="inv-header">
     <div>
       ${logo}
-      <div style="font-size:1.1rem;font-weight:700">${bizName}</div>
-      <div class="biz">${bizAddress}</div>
-      ${bizPhone ? `<div class="biz">${bizPhone}</div>` : ''}
+      <div class="biz-name">${bizName}</div>
+      <div class="biz-info">
+        ${bizAddress ? `${bizAddress}<br>` : ''}
+        ${bizPhone   ? `${bizPhone}<br>` : ''}
+        ${bizEmail   ? `${bizEmail}<br>` : ''}
+        ${bizWebsite ? `${bizWebsite}` : ''}
+      </div>
     </div>
     <div style="text-align:right">
-      <h1>INVOICE</h1>
-      <div style="font-size:1rem;opacity:.9">${inv.invoice_number}</div>
-      <div style="margin-top:8px"><span class="status-badge">${inv.status.toUpperCase()}</span></div>
+      <div class="inv-title">INVOICE</div>
+      <div class="inv-num">${inv.invoice_number}</div>
+      ${statusBadge ? `<div style="margin-top:10px">${statusBadge}</div>` : ''}
     </div>
   </div>
 
-  ${customMessage ? `<div class="msg-box">${customMessage}</div>` : ''}
+  <!-- OPTIONAL MESSAGE -->
+  ${customMessage ? `<div style="padding:16px 48px 0"><div class="msg-box">${customMessage}</div></div>` : ''}
 
-  <div class="meta">
-    <div class="meta-box">
-      <h4>Bill To</h4>
-      <p><strong>${inv.client_name}</strong></p>
-      ${inv.client_email ? `<p>${inv.client_email}</p>` : ''}
-      ${inv.client_phone ? `<p>${inv.client_phone}</p>` : ''}
-      ${inv.client_address ? `<p>${inv.client_address.replace(/\n/g,'<br>')}</p>` : ''}
+  <!-- BILL TO / DETAILS -->
+  <div class="inv-meta">
+    <div class="meta-col">
+      <div class="meta-label">Bill To</div>
+      <div class="meta-value">
+        <strong>${inv.client_name}</strong><br>
+        ${inv.client_email   ? `${inv.client_email}<br>` : ''}
+        ${inv.client_phone   ? `${inv.client_phone}<br>` : ''}
+        ${inv.client_address ? `${inv.client_address.replace(/\n/g,'<br>')}` : ''}
+      </div>
     </div>
-    <div class="meta-box">
-      <h4>Invoice Details</h4>
-      <p>Invoice #: <strong>${inv.invoice_number}</strong></p>
-      <p>Issue Date: ${inv.issue_date||'—'}</p>
-      ${inv.due_date ? `<p>Due Date: <strong>${inv.due_date}</strong></p>` : ''}
+    <div class="meta-col">
+      <div class="meta-label">Invoice Details</div>
+      <div class="meta-value">
+        <table style="width:100%;margin:0;border:none">
+          <tr><td style="padding:2px 0;color:#6b7280;font-size:.82rem;border:none">Invoice #</td><td style="padding:2px 0;font-weight:600;text-align:right;border:none">${inv.invoice_number}</td></tr>
+          ${inv.issue_date ? `<tr><td style="padding:2px 0;color:#6b7280;font-size:.82rem;border:none">Issue Date</td><td style="padding:2px 0;text-align:right;border:none">${inv.issue_date}</td></tr>` : ''}
+          ${inv.due_date   ? `<tr><td style="padding:2px 0;color:#6b7280;font-size:.82rem;border:none">Due Date</td><td style="padding:2px 0;font-weight:700;color:#dc2626;text-align:right;border:none">${inv.due_date}</td></tr>` : ''}
+        </table>
+      </div>
     </div>
   </div>
 
-  <div class="items">
+  <!-- LINE ITEMS -->
+  <div class="items-section">
     <table>
-      <thead><tr><th>Description</th><th class="text-right">Qty</th><th class="text-right">Unit Price</th><th class="text-right">Amount</th></tr></thead>
+      <thead>
+        <tr>
+          <th style="width:50%">Description</th>
+          <th class="r" style="width:12%">Qty</th>
+          <th class="r" style="width:19%">Unit Price</th>
+          <th class="r" style="width:19%">Amount</th>
+        </tr>
+      </thead>
       <tbody>
-        ${items.map(it => `
-          <tr>
-            <td>${it.description}</td>
-            <td class="text-right">${it.quantity}</td>
-            <td class="text-right">${fmt(it.unit_price)}</td>
-            <td class="text-right">${fmt(it.amount)}</td>
+        ${items.map((it,i) => `
+          <tr style="${i%2===1?'background:#fafafa':''}">
+            <td class="desc">${it.description || ''}</td>
+            <td class="r">${it.quantity}</td>
+            <td class="r">${fmt(it.unit_price)}</td>
+            <td class="r" style="font-weight:600">${fmt(it.amount)}</td>
           </tr>`).join('')}
       </tbody>
     </table>
   </div>
 
-  <div class="totals">
-    <div class="total-row"><span>Subtotal</span><span>${fmt(inv.subtotal)}</span></div>
-    ${inv.tax_rate > 0 ? `<div class="total-row"><span>Tax (${inv.tax_rate}%)</span><span>${fmt(inv.tax_amount)}</span></div>` : ''}
-    ${inv.discount > 0 ? `<div class="total-row"><span>Discount</span><span>-${fmt(inv.discount)}</span></div>` : ''}
-    <div class="total-row grand"><span>Total</span><span>${fmt(inv.total)}</span></div>
-    ${inv.amount_paid > 0 ? `<div class="total-row"><span>Amount Paid</span><span style="color:#16a34a">-${fmt(inv.amount_paid)}</span></div>` : ''}
-    <div class="total-row balance"><span>Balance Due</span><span>${fmt(inv.balance_due)}</span></div>
+  <!-- TOTALS -->
+  <div class="totals-wrap">
+    <div class="totals-box">
+      <div class="t-row"><span>Subtotal</span><span>${fmt(inv.subtotal)}</span></div>
+      ${inv.tax_rate > 0 ? `<div class="t-row"><span>Tax (${inv.tax_rate}%)</span><span>${fmt(inv.tax_amount)}</span></div>` : ''}
+      ${inv.discount > 0 ? `<div class="t-row"><span>Discount</span><span>-${fmt(inv.discount)}</span></div>` : ''}
+      <div class="t-divider"></div>
+      <div class="t-grand"><span>Total</span><span>${fmt(inv.total)}</span></div>
+      ${(parseFloat(inv.amount_paid)||0) > 0 ? `<div class="t-row"><span>Amount Paid</span><span style="color:#16a34a">-${fmt(inv.amount_paid)}</span></div>` : ''}
+      <div class="t-balance"><span>Balance Due</span><span>${fmt(inv.balance_due)}</span></div>
+    </div>
   </div>
 
-  ${inv.notes || inv.terms || inv.footer ? `
-  <div class="footer-section">
-    ${inv.notes  ? `<p><strong>Notes:</strong> ${inv.notes}</p>` : ''}
-    ${inv.terms  ? `<p><strong>Terms:</strong> ${inv.terms}</p>` : ''}
-    ${inv.footer ? `<p>${inv.footer}</p>` : ''}
+  <!-- PAYMENT LINK -->
+  ${inv.payment_link ? `
+  <div class="pay-section">
+    <div style="font-size:.85rem;color:#0369a1;font-weight:600;margin-bottom:4px">Ready to pay?</div>
+    <div style="font-size:.8rem;color:#64748b">Click the button below to pay securely online.</div>
+    <a href="${inv.payment_link}" class="pay-btn">Pay Now →</a>
   </div>` : ''}
 
-  <div style="padding:16px 40px;text-align:center;font-size:.75rem;color:#bbb;border-top:1px solid #f0f0f0">
-    Generated by IRS Financial Calculator · ${new Date().toLocaleDateString()}
+  <!-- NOTES / TERMS -->
+  ${inv.notes || inv.terms || inv.footer ? `
+  <div class="notes-section">
+    ${inv.notes  ? `<p style="margin-bottom:6px"><strong>Notes:</strong> ${inv.notes}</p>` : ''}
+    ${inv.terms  ? `<p style="margin-bottom:6px"><strong>Terms:</strong> ${inv.terms}</p>` : ''}
+    ${inv.footer ? `<p style="margin-top:8px;font-size:.75rem">${inv.footer}</p>` : ''}
+  </div>` : ''}
+
+  <!-- FOOTER -->
+  <div class="inv-footer">
+    <span>${bizName}</span>
+    <span>Thank you for your business</span>
+    <span>${new Date().toLocaleDateString()}</span>
   </div>
-</div></body></html>`;
+
+</div>
+</body></html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
